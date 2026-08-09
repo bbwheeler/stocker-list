@@ -12,6 +12,8 @@ message Company {
   string currency = 4; // e.g. "CAD"
 }
 
+message Empty {}
+
 message ListCompaniesRequest {
   // Max number of companies to return. Defaults to 50, capped at 500.
   int32 page_size = 1;
@@ -44,4 +46,10 @@ service CompanyService {
   // GetCompany returns a single company by stock symbol.
   // Returns NOT_FOUND if the symbol isn't tracked.
   rpc GetCompany(GetCompanyRequest) returns (GetCompanyResponse);
+}
+
+// StockerList handles client-streaming of stocks to stocker-store.
+service StockerList {
+  // GetStocks receives a stream of stocks and streams them to stocker-store.
+  rpc GetStocks(stream Company) returns (Empty);
 }
