@@ -1,5 +1,5 @@
 [Container]
-Image=localhost/stocker-list:latest
+Image=containers.wheeli.ca/stocker-list:latest
 PublishPort=50051:50051
 EnvironmentFile=/etc/stocker-list/.env.podman
 PodmanArgs=--read-only
