@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
-	"github.com/example/tsx-tracker/internal/db"
+	"github.com/anomalyco/stocker-list/internal/db"
 )
+
+const maxBodySize = 20 << 20
 
 type USClient struct {
 	baseURL    string
