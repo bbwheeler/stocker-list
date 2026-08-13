@@ -1,8 +1,4 @@
-# Design: stocker-list — Replace Local DB with gRPC Call to stocker-store
-
-## Background
-
-Currently, `stocker-list` retrieves stocks via its provider layer and stores them in a local PostgreSQL database (accessed through SQLC-generated queries). The design is changing: instead of persisting stocks locally, the service will transform retrieved data into the protobuf shape defined by **stocker-store** and stream it to that sister service via gRPC. This removes all local database dependencies entirely.
+# Design: stocker-list
 
 ---
 

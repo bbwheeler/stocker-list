@@ -1,8 +1,6 @@
-# tsx-tracker
+# stocker-list
 
-A Go service that tracks companies listed on the Toronto Stock Exchange
-(TSX) in a PostgreSQL database, keeps their data fresh, and exposes it
-over gRPC. Every 24 hours it syncs the full TSX symbol list — adding new
+A Go service that pulls stock information from the internet and adds it to the stocker-store. On a timer, it adds new
 listings and removing delisted companies.
 
 ## Architecture
@@ -10,28 +8,13 @@ listings and removing delisted companies.
 ```
 cmd/server/main.go        wires everything together, starts the gRPC server
 internal/config           env-var configuration (DB, refresh cadence)
-internal/db               Postgres repository (schema, upsert, query, pagination)
-internal/provider         TMX company directory client (TSX symbol list, no API key)
+internal/provider         Company directory clients
 internal/refresher        background loop syncing symbols + pruning delisted
-internal/grpcserver       gRPC service implementation
-proto/tsx/v1/tsx.proto    gRPC API definition
-gen/tsx/v1                generated protobuf/gRPC Go code (run `make proto` first)
-migrations/0001_init.sql  Postgres schema (embedded in internal/db/)
 ```
 
-### Why PostgreSQL
-
-The task allows Cassandra, MongoDB, or Postgres. Company records here are a
-fixed, relational schema (symbol, name, exchange, currency) with one
-access pattern: exact-match lookup by primary key (symbol). That's a
-textbook relational workload — Postgres gives strong consistency, indexed
-lookups, and simple upserts (`ON CONFLICT`) with far less operational
-overhead than running Cassandra (built for massive write throughput across
-many nodes) or MongoDB (best when the schema is genuinely variable/nested)
-for this use case. The DB connection is fully configurable via env vars
-(`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`).
-
 ### Where the data comes from
+
+#### TSX
 
 The service uses the **official TMX company directory** — a free, public
 JSON API provided by the Toronto Stock Exchange itself. No API key is
@@ -44,87 +27,37 @@ this once per sync cycle to build the complete symbol list.
 Every cycle the full TSX symbol list is synced — new listings are added
 and delisted symbols are removed.
 
+#### US Companies
+
+TODO
+
 ## Running it
 
-### 1. Generate the gRPC code
+### 3a. Run with Podman
 ```
-cp .env.example .env   # edit DB credentials
-make proto             # requires buf (https://buf.build), or:
-make proto-protoc      # requires local protoc + protoc-gen-go + protoc-gen-go-grpc
+make podman-up
 ```
 
-### 3a. Run with Docker Compose (recommended)
-```
-export DB_USER=postgres
-export DB_PASSWORD=your_password
-make docker-up
-```
-This starts Postgres and the service together; the Containerfile generates
-the gRPC code and builds the binary in a multi-stage build.
-
-### 3b. Deploy with Podman (Debian Linux)
-
-Install Podman:
-```
-sudo apt update
-sudo apt install -y podman podman-compose
-```
-
-Build and run:
-```
-export DB_USER=postgres
-export DB_PASSWORD=your_password
-podman-compose up -d --build
-```
-
-To stop and remove:
-```
-podman-compose down -v
-```
-
-To view logs:
-```
-podman-compose logs -f
-```
-
-### 3c. Deploy with Podman Quadlet (rootless, Debian)
+### 3b. Deploy with Podman Quadlet (rootless, Debian)
 
 Quadlet lets you manage Podman containers as systemd user services — the
 container starts on boot without root.
 
-**Prerequisites — install Podman and set up lingering:**
-```
-sudo apt update
-sudo apt install -y podman systemd-container
-sudo loginctl enable-linger $USER
-```
-
-Lingering lets systemd user services (including this container) run
-without an active login session.
-
-**External Postgres:** The service connects to a PostgreSQL instance
-configured via environment variables. Make sure a Postgres server is
-reachable at the host/port you specify in the env file (default
-`DB_HOST=192.168.1.31:5432`). The database `tsx_tracker` must exist.
-
 **1. Clone the repo and install:**
 ```
-git clone https://github.com/youruser/tsx-tracker.git ~/tsx-tracker
-cd ~/tsx-tracker
+git clone https://github.com/youruser/stocker-list.git ~/stocker-list
+cd ~/stocker-list
 make quadlet-install
 ```
 
 This copies the Quadlet unit file to `~/.config/containers/systemd/`,
-installs the env file to `~/.config/tsx-tracker/.env.podman`, and runs
+installs the env file to `~/.config/stocker-list/.env.podman`, and runs
 `systemctl --user daemon-reload`.
 
 **2. Edit the environment file** with your credentials:
 ```
 $EDITOR ~/.config/tsx-tracker/.env.podman
 ```
-
-Fill in `DB_USER` and `DB_PASSWORD`. See
-`.env.podman` in the repo for all available settings.
 
 **3. Build the container image:**
 ```
@@ -133,7 +66,7 @@ make quadlet-build
 
 Or equivalently:
 ```
-podman build -t localhost/tsx-tracker:latest .
+podman build -t localhost/stocker-list:latest .
 ```
 
 **4. Start the service:**
@@ -146,19 +79,13 @@ service starts automatically on boot.
 
 **5. Check status and logs:**
 ```
-systemctl --user status tsx-tracker
-podman logs tsx-tracker
+systemctl --user status stocker-list
+podman logs stocker-list
 ```
 
 **Stopping:**
 ```
-systemctl --user stop tsx-tracker
-```
-
-To prevent auto-start on boot, remove the wants symlink:
-```
-rm ~/.config/systemd/user/default.target.wants/tsx-tracker.service
-systemctl --user daemon-reload
+systemctl --user stop tstocker-list
 ```
 
 **Updating:** pull new code, rebuild, and restart:
@@ -166,7 +93,7 @@ systemctl --user daemon-reload
 cd ~/tsx-tracker
 git pull
 make quadlet-build
-systemctl --user restart tsx-tracker
+systemctl --user restart stocker-list
 ```
 
 ### 3d. Run locally
