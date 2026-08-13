@@ -3,6 +3,7 @@ Before you begin, follow these steps:
 1. Make sure all existing changes have been checked in; if there are existing changes, commit them and push them to git.wheeli.ca.
 2. Do a git fetch so that you have all of the latest changes.
 3. Switch to a branch or create a branch appropriate for the changes that you will make
+4. Start your task
 
 ## Finishing Tasks
 Once you complete any changes, additions, deletions, or modifications, follow these steps:
@@ -10,6 +11,3 @@ Once you complete any changes, additions, deletions, or modifications, follow th
 2. Push the code to git.wheeli.ca
 3. Open a Pull Request for the changes you just pushed
 4. Add me (brian) as a reviewer on the Pull Request
-
-## Credentials
-Your credentials for git.wheeli.ca can be found in the parent directory (../credentials.md)
