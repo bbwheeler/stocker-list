@@ -1,19 +1,17 @@
 # stocker-list
 
-A Go service that pulls stock information from the internet and adds it to the stocker-store. On a timer, it adds new
-listings and removing delisted companies.
+A Go service that pulls stock information from the internet and sends it out on a kafka topic.
 
 ## Architecture
 
 ```
 cmd/server/main.go        wires everything together, starts the gRPC server
-internal/config           env-var configuration (DB, refresh cadence)
+internal/config           env-var configuration (Kafka config, refresh cadence)
 internal/provider         Company directory clients
-internal/refresher        background loop syncing symbols + pruning delisted
+internal/refresher        background loop retrieving symbols
 ```
 
 ### Where the data comes from
-
 #### TSX
 
 The service uses the **official TMX company directory** — a free, public
@@ -59,19 +57,13 @@ installs the env file to `~/.config/stocker-list/.env.podman`, and runs
 $EDITOR ~/.config/tsx-tracker/.env.podman
 ```
 
-**3. Build the container image:**
-```
-make quadlet-build
-```
+**3. Deploy the latest image to the container registry**
 
-Or equivalently:
-```
-podman build -t localhost/stocker-list:latest .
-```
+TODO
 
 **4. Start the service:**
 ```
-systemctl --user start tsx-tracker.service
+systemctl --user start stocker-list.service
 ```
 
 The `WantedBy=default.target` in the `.container` file ensures the
@@ -88,57 +80,8 @@ podman logs stocker-list
 systemctl --user stop tstocker-list
 ```
 
-**Updating:** pull new code, rebuild, and restart:
-```
-cd ~/tsx-tracker
-git pull
-make quadlet-build
-systemctl --user restart stocker-list
-```
+**Updating:** Deploy the latest image to the container registry
 
-### 3d. Run locally
-```
-# start a local Postgres, then:
-export $(cat .env | xargs)
-make run
-```
+TODO
 
-The service listens on `:50051` (configurable via `GRPC_PORT`) and
-registers gRPC reflection, so you can explore/call it with `grpcurl`
-without needing the `.proto` file locally:
 
-```
-grpcurl -plaintext localhost:50051 list
-grpcurl -plaintext localhost:50051 tsx.v1.CompanyService/ListCompanies
-grpcurl -plaintext -d '{"symbol": "SHOP.TO"}' localhost:50051 tsx.v1.CompanyService/GetCompany
-```
-
-## gRPC API
-
-```protobuf
-service CompanyService {
-  rpc ListCompanies(ListCompaniesRequest) returns (ListCompaniesResponse);
-  rpc GetCompany(GetCompanyRequest) returns (GetCompanyResponse);
-}
-```
-
-- `ListCompanies` — paginated (keyset pagination via `page_token`, default
-  page size 50, max 500).
-- `GetCompany` — fetch one company by `symbol` (case-insensitive). Returns
-  a `NOT_FOUND` gRPC status if the symbol isn't tracked.
-
-See `proto/tsx/v1/tsx.proto` for full message definitions, including the
-`Company` message (symbol, name, exchange, currency).
-
-## Notes / next steps for production use
-
-- This ships a minimal `Migrate()` that runs the schema SQL idempotently
-  on startup; for a real production system, use a proper migration tool
-  (golang-migrate, atlas, etc.) once the schema evolves.
-- Add TLS/auth to the gRPC server before exposing it outside a trusted
-  network — it currently runs in plaintext for simplicity.
-- Consider adding the standard gRPC health-checking protocol
-  (`grpc_health_v1`) for orchestrator liveness/readiness probes.
-- `go.mod` lists direct dependencies; run `make tidy` (`go mod tidy`) after
-  generating the proto code to resolve exact versions and populate
-  `go.sum` for your environment.
