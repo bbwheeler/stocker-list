@@ -19,6 +19,7 @@ import (
 	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/db"
 	"github.com/anomalyco/stocker-list/internal/grpcserver"
+	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
 	"github.com/anomalyco/stocker-list/internal/refresher"
 
@@ -100,6 +101,11 @@ func run(log *slog.Logger) error {
 	case <-time.After(30 * time.Second):
 		log.Warn("refresher did not stop within timeout, continuing")
 	}
+
+	// Kafka integration
+	// Kafka producer integration for stocker-store
+	kafkaProducer := &kafka.Producer{}
+	refresher := refresher.New(cfg, repo, providers, log, kafkaProducer)
 
 	return nil
 }

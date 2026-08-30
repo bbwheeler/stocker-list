@@ -11,7 +11,9 @@ import (
 
 	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/db"
+	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
+	kafkastockv1 "github.com/anomalyco/stocker-list/internal/proto/kafka/v1/kafkastockv1"
 )
 
 type Refresher struct {
@@ -19,10 +21,11 @@ type Refresher struct {
 	repo      *db.Repository
 	providers []provider.Provider
 	log       *slog.Logger
+	producer  *kafka.Producer
 }
 
-func New(cfg *config.Config, repo *db.Repository, providers []provider.Provider, log *slog.Logger) *Refresher {
-	return &Refresher{cfg: cfg, repo: repo, providers: providers, log: log}
+func New(cfg *config.Config, repo *db.Repository, providers []provider.Provider, log *slog.Logger, producer *kafka.Producer) *Refresher {
+	return &Refresher{cfg: cfg, repo: repo, providers: providers, log: log, producer: producer}
 }
 
 // Run blocks, performing an immediate sync and then repeating every
@@ -74,6 +77,21 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]string, error) {
 
 	if err := r.repo.InsertSymbolStubs(ctx, allCompanies); err != nil {
 		return nil, err
+	}
+
+	if r.producer != nil {
+		stocks := make([]*kafkastockv1.StockUpdate, len(allCompanies))
+		for i, c := range allCompanies {
+			stocks[i] = &kafkastockv1.StockUpdate{
+				Symbol:   c.Symbol,
+				Exchange: c.Exchange,
+				Scores:   map[string]float64{"discovered": 1.0},
+			}
+			if err := r.producer.PublishStockUpdate(ctx, stocks[i]); err != nil {
+				r.log.Warn("failed to publish stock update", "symbol", c.Symbol, "error", err)
+			}
+		}
+		_ = stocks // use in future scoring work
 	}
 
 	symbols := make([]string, len(allCompanies))
