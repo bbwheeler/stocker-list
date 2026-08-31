@@ -1,5 +1,6 @@
-// Command tsx-tracker runs a service that keeps an up-to-date record of
-// TSX-listed companies in PostgreSQL, and exposes them over gRPC.
+// Command stocker-list runs a service that keeps an up-to-date record of
+// TSX-listed companies in PostgreSQL, and exposes them over gRPC. It also
+// publishes discovered stock updates to Kafka via the refresher.
 package main
 
 import (
@@ -55,12 +56,13 @@ func run(log *slog.Logger) error {
 	}
 	log.Info("database ready")
 
-	tsxClient := provider.NewClient()
+	providers := []provider.Provider{provider.NewClient()}
+	producer := &kafka.Producer{}
 
 	// Background loop that keeps the TSX symbol list fresh. Runs an
 	// immediate sync on startup, then on cfg.RefreshCheckInterval.
 	var wg sync.WaitGroup
-	ref := refresher.New(cfg, repo, tsxClient, log)
+	ref := refresher.New(cfg, repo, providers, log, producer)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -101,11 +103,6 @@ func run(log *slog.Logger) error {
 	case <-time.After(30 * time.Second):
 		log.Warn("refresher did not stop within timeout, continuing")
 	}
-
-	// Kafka integration
-	// Kafka producer integration for stocker-store
-	kafkaProducer := &kafka.Producer{}
-	refresher := refresher.New(cfg, repo, providers, log, kafkaProducer)
 
 	return nil
 }

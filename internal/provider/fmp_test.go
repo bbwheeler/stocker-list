@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/example/tsx-tracker/internal/db"
+	"github.com/anomalyco/stocker-list/internal/db"
 )
 
 func TestListSymbols_Success(t *testing.T) {
