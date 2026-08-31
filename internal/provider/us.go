@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
-
-	"github.com/anomalyco/stocker-list/internal/db"
 )
 
 const maxBodySize = 20 << 20
@@ -35,7 +32,7 @@ func NewUSClient(apiKey string) *USClient {
 	// Note: I'll use a placeholder for the base URL to make it easy to override.
 }
 
-func (c *USClient) ListSymbols(ctx context.Context) ([]db.Company, error) {
+func (c *USClient) ListSymbols(ctx context.Context) ([]Company, error) {
 	url := fmt.Sprintf("%s?apikey=%s", c.baseURL, c.apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -57,7 +54,7 @@ func (c *USClient) ListSymbols(ctx context.Context) ([]db.Company, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	out := make([]db.Company, 0, len(stocks))
+	out := make([]Company, 0, len(stocks))
 	for _, s := range stocks {
 		// FMP's stock list might not have all fields for every symbol in the free tier.
 		// We'll use what we have.
@@ -70,7 +67,7 @@ func (c *USClient) ListSymbols(ctx context.Context) ([]db.Company, error) {
 			currency = s.Currency
 		}
 
-		out = append(out, db.Company{
+		out = append(out, Company{
 			Symbol:   s.Symbol,
 			Name:     s.Name,
 			Exchange: exchange,

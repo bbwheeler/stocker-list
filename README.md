@@ -11,6 +11,25 @@ internal/provider         Company directory clients
 internal/refresher        background loop retrieving symbols
 ```
 
+### Where the data goes - Kafka Integration
+
+The service publishes StockUpdate messages to a Kafka topic using protobuf serialization from [stocker-store](https://git.wheeli.ca/brian/stocker-store).
+
+- **Module:** `stocker-store` (resolved to `git.wheeli.ca/brian/stocker-store` via a `replace` directive in `go.mod`)
+- **Package:** `kafkastockv1`
+- **Import path:** `stocker-store/proto/v1/kafka` (the external Go module dependency listed in `go.mod`)
+- **Message type:** `kafkastockv1.StockUpdate{Symbol, Exchange, Scores}`
+
+```go
+import kafkastockv1 "stocker-store/proto/v1/kafka"
+
+msg := &kafkastockv1.StockUpdate{
+    Symbol:   "AAPL",
+    Exchange: "NASDAQ",
+    Scores: map[string]float64{"momentum": 0.7},
+}
+```
+
 ### Where the data comes from
 #### TSX
 
