@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/anomalyco/stocker-list/internal/db"
 )
 
 func TestListSymbols_Success(t *testing.T) {
@@ -52,7 +50,7 @@ func TestListSymbols_EmptyResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
-	symbols, err := c.List// ListSymbols(context.Background())
+	symbols, err := c.ListSymbols(context.Background())
 	if err != nil {
 		t.Fatalf("ListSymbols: %v", err)
 	}
@@ -81,7 +79,7 @@ func TestListSymbols_InvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := &Client{baseURL: srv.URL, httpClient: ssrv.Client()}
+	c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
 	_, err := c.ListSymbols(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")

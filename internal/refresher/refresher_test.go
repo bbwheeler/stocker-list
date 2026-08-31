@@ -126,7 +126,7 @@ func TestTick_WithRealRepo(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(wrapper.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 
@@ -176,7 +176,7 @@ func TestTick_PruneDelisted(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -212,7 +212,7 @@ func TestTick_SymbolsAPIError(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -238,7 +238,7 @@ func TestTick_ContextCancellation(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -273,7 +273,7 @@ func TestTick_MultipleSymbols(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -316,7 +316,7 @@ func TestTick_IdempotentSymbols(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -352,7 +352,7 @@ func TestTick_SymbolSync_CaseInsensitive(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -386,7 +386,7 @@ func TestTick_SymbolSync_EmptyList(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
@@ -424,7 +424,7 @@ func TestTick_SymbolSync_PrunesAndAdds(t *testing.T) {
 
 	cfg := testConfig()
 	p := provider.NewClientForTest(srv.URL)
-	ref := refresher.New(cfg, repo, p, log)
+	ref := refresher.New(cfg, repo, []provider.Provider{p}, log, nil)
 
 	go ref.Run(ctx)
 	time.Sleep(2 * time.Second)
