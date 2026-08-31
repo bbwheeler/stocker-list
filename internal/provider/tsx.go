@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	"github.com/anomalyco/stocker-list/internal/db"
 )
 
 const defaultBaseURL = "https://www.tsx.com/json/company-directory/search/tsx/*"
@@ -48,7 +46,7 @@ func NewClientForTest(baseURL string) *Client {
 
 // ListSymbols returns every stock symbol listed on the Toronto Stock
 // Exchange (TSX) by querying the official TMX company directory.
-func (c *Client) ListSymbols(ctx context.Context) ([]db.Company, error) {
+func (c *Client) ListSymbols(ctx context.Context) ([]Company, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL, nil)
 	if err != nil {
 		return nil, err
@@ -71,12 +69,12 @@ func (c *Client) ListSymbols(ctx context.Context) ([]db.Company, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	out := make([]db.Company, 0, len(tsxResp.Results))
+	out := make([]Company, 0, len(tsxResp.Results))
 	for _, e := range tsxResp.Results {
 		if e.Symbol == "" {
 			continue
 		}
-		out = append(out, db.Company{
+		out = append(out, Company{
 			Symbol:   e.Symbol,
 			Name:     e.Name,
 			Exchange: "TSX",
