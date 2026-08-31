@@ -5,7 +5,7 @@ package kafka
 import (
 	"context"
 
-	kafkastockv1 "github.com/anomalyco/stocker-list/internal/proto/kafka/v1/kafkastockv1"
+	kafkastockv1 "stocker-store/proto/v1/kafka"
 )
 
 const (

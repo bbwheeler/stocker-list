@@ -12,7 +12,7 @@ import (
 	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
-	kafkastockv1 "github.com/anomalyco/stocker-list/internal/proto/kafka/v1/kafkastockv1"
+	kafkastockv1 "stocker-store/proto/v1/kafka"
 )
 
 type Refresher struct {

@@ -13,17 +13,15 @@ internal/refresher        background loop retrieving symbols
 
 ### Where the data goes - Kafka Integration
 
-The service publishes StockUpdate messages to a Kafka topic using protobuf serialization from `stocker-store`. The message types are copied locally for use during the private repo phase:
+The service publishes StockUpdate messages to a Kafka topic using protobuf serialization from [stocker-store](https://git.wheeli.ca/brian/stocker-store).
 
-- **Location:** `internal/proto/kafka/v1/kafkastockv1/`
-- **Package:** `kafkastockv1` (from `option go_package = "stocker-store/proto/v1/kafka;kafkastockv1"`)
-- **Import path:** `github.com/anomalyco/stocker-list/internal/proto/kafka/v1/kafkastockv1`
+- **Module:** `stocker-store` (resolved to `git.wheeli.ca/brian/stocker-store` via a `replace` directive in `go.mod`)
+- **Package:** `kafkastockv1`
+- **Import path:** `stocker-store/proto/v1/kafka` (the external Go module dependency listed in `go.mod`)
 - **Message type:** `kafkastockv1.StockUpdate{Symbol, Exchange, Scores}`
 
-**Future migration:** When stocker-store publishes publicly at `github.com/wheeli-ca/stocker-store`, this will migrate to an external module dependency with zero code changes — only the import path updates.
-
 ```go
-import kafkastockv1 "github.com/anomalyco/stocker-list/internal/proto/kafka/v1/kafkastockv1"
+import kafkastockv1 "stocker-store/proto/v1/kafka"
 
 msg := &kafkastockv1.StockUpdate{
     Symbol:   "AAPL",
