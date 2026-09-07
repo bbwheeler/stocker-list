@@ -1,4 +1,0 @@
-[Build]
-File=%h/stocker-list/Containerfile
-SetWorkingDirectory=%h/stocker-list
-ImageTag=localhost/stocker-list:latest

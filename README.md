@@ -46,7 +46,7 @@ and delisted symbols are removed.
 
 #### US Companies
 
-TODO
+https://financialmodelingprep.com/api/v3/stock/list
 
 ## Running it
 
