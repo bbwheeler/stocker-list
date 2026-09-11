@@ -2,8 +2,6 @@
 Image=git.wheeli.ca/brian/stocker-list:latest
 Network=host
 EnvironmentFile=%h/.config/stocker-list/.env.podman
-PodmanArgs=--read-only
-PodmanArgs=--tmpfs=/tmp:rw,noexec,nosuid,size=64m
 AutoUpdate=registry
 
 [Service]
