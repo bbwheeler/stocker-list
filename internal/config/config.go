@@ -16,6 +16,17 @@ type Config struct {
 
 	// Refresh behaviour
 	RefreshCheckInterval time.Duration
+
+	// Kafka
+	KafkaBrokers       string
+	KafkaTopic         string
+	KafkaSASLUsername  string
+	KafkaSASLPassword  string
+	KafkaSASLMechanism string
+	KafkaSSLEnabled    bool
+
+	// Provider (US / FMP)
+	FMPAPIKey string
 }
 
 func Load() (*Config, error) {
@@ -23,6 +34,14 @@ func Load() (*Config, error) {
 		GRPCPort: getEnvInt("GRPC_PORT", 50051),
 
 		RefreshCheckInterval: getEnvDuration("REFRESH_CHECK_INTERVAL", 24*time.Hour),
+
+		KafkaBrokers:       getEnv("KAFKA_BROKERS", ""),
+		KafkaTopic:         getEnv("KAFKA_TOPIC", "stock.update.v1"),
+		KafkaSASLUsername:  getEnv("KAFKA_SASL_USERNAME", ""),
+		KafkaSASLPassword:  getEnv("KAFKA_SASL_PASSWORD", ""),
+		KafkaSASLMechanism: getEnv("KAFKA_SASL_MECHANISM", "PLAIN"),
+		KafkaSSLEnabled:    getEnvBool("KAFKA_SSL_ENABLED", true),
+		FMPAPIKey:          getEnv("FMP_API_KEY", ""),
 	}
 
 	if cfg.GRPCPort < 1 || cfg.GRPCPort > 65535 {
@@ -55,6 +74,15 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback
