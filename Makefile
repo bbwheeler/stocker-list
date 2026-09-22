@@ -20,7 +20,7 @@ tidy:
 	go mod tidy
  
 build: proto
-	go build -o bin/tsx-tracker ./cmd/server
+	go build -o bin/stocker-list ./cmd/server
  
 run: proto
 	go run ./cmd/server
@@ -36,16 +36,16 @@ podman-down:
  
 quadlet-install:
 	mkdir -p ~/.config/containers/systemd
-	mkdir -p ~/.config/tsx-tracker
-	cp deploy/quadlet/tsx-tracker-rootless.container ~/.config/containers/systemd/tsx-tracker.container
-	cp -n .env.podman ~/.config/tsx-tracker/.env.podman 2>/dev/null || true
-	chmod 600 ~/.config/tsx-tracker/.env.podman
+	mkdir -p ~/.config/stocker-list
+	cp deploy/quadlet/stocker-list-rootless.container ~/.config/containers/systemd/stocker-list.container
+	cp -n .env.podman ~/.config/stocker-list/.env.podman 2>/dev/null || true
+	chmod 600 ~/.config/stocker-list/.env.podman
 	systemctl --user daemon-reload
  
 quadlet-build:
-	podman build --no-cache -t localhost/tsx-tracker:latest .
+	podman build --no-cache -t git.wheeli.ca/brian/stocker-list:latest .
  
 quadlet-enable: quadlet-build
 	systemctl --user daemon-reload
-	systemctl --user start tsx-tracker.service
+	systemctl --user start stocker-list.service
 
