@@ -9,14 +9,14 @@ import (
 	"log/slog"
 	"time"
 
+	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
-	kafkastockv1 "stocker-store/proto/v1/kafka"
 )
 
 type Refresher struct {
-	cfg       *config.Config
+	cfg *config.Config
 	// repo is the (optional) persistence sink. It is nil in Kafka-only mode,
 	// where discovered symbols are published upstream instead of stored locally.
 	repo      any
@@ -75,7 +75,7 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 
 	if r.producer != nil {
 		for _, c := range allCompanies {
-			msg := &kafkastockv1.StockUpdate{
+			msg := &kafkastockv1.Stock{
 				Symbol:   c.Symbol,
 				Exchange: c.Exchange,
 				Scores:   map[string]float64{"discovered": 1.0},

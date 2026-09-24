@@ -5,10 +5,10 @@ go 1.25.0
 require (
 	github.com/IBM/sarama v1.60.2
 	google.golang.org/protobuf v1.36.12
-	stocker-store v0.0.0
 )
 
 require (
+	git.wheeli.ca/brian/stocker-store v0.0.0-20260924185324-fc63d46307a2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
@@ -24,5 +24,3 @@ require (
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
-
-replace stocker-store v0.0.0 => git.wheeli.ca/brian/stocker-store v0.0.0-20260831021953-e273f709a428

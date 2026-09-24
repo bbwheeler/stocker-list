@@ -1,5 +1,7 @@
 git.wheeli.ca/brian/stocker-store v0.0.0-20260831021953-e273f709a428 h1:05BgpNGP4IsnxMXQF+g2bzjLg7ilwX5LIjKDwoPCy9o=
 git.wheeli.ca/brian/stocker-store v0.0.0-20260831021953-e273f709a428/go.mod h1:7XARA9HIZBcfA9UY1wc77CzSk3apB66J1QxvrY26Tug=
+git.wheeli.ca/brian/stocker-store v0.0.0-20260924185324-fc63d46307a2 h1:1Iy9rxeUvjjIb6KYf5nAfm45WCKzOmUbHXOFZGO8Fek=
+git.wheeli.ca/brian/stocker-store v0.0.0-20260924185324-fc63d46307a2/go.mod h1:2DoYqkEHkGH1v+eDj75M8n/tqJrbnuEk/0Gi74Rm9Zo=
 github.com/IBM/sarama v1.60.2 h1:T/HyMhOJMyH/BgkBLCiuTDH8EJAEf32eDbNldlKOWIg=
 github.com/IBM/sarama v1.60.2/go.mod h1:fZRPG+DZm8DM9WpmslgMiVErD46mmYAYBiFWC8XKkes=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

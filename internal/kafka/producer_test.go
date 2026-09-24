@@ -8,7 +8,7 @@ import (
 	"github.com/IBM/sarama"
 	"google.golang.org/protobuf/proto"
 
-	kafkastockv1 "stocker-store/proto/v1/kafka"
+	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 
 	"github.com/anomalyco/stocker-list/internal/config"
 )
@@ -17,7 +17,7 @@ import (
 // no-op: publishing returns nil without panicking or dialing any broker.
 func TestProducer_ZeroValue_NoOp(t *testing.T) {
 	p := &Producer{}
-	msg := &kafkastockv1.StockUpdate{Symbol: "AC", Exchange: "TSX"}
+	msg := &kafkastockv1.Stock{Symbol: "AC", Exchange: "TSX"}
 	if err := p.PublishStockUpdate(context.Background(), msg); err != nil {
 		t.Fatalf("PublishStockUpdate = %v, want nil", err)
 	}
@@ -27,7 +27,7 @@ func TestProducer_ZeroValue_NoOp(t *testing.T) {
 // a Topic set but no client must still be a no-op.
 func TestProducer_WithTopic_NoOp(t *testing.T) {
 	p := &Producer{Topic: StockUpdateTopic}
-	msg := &kafkastockv1.StockUpdate{Symbol: "AC", Exchange: "TSX"}
+	msg := &kafkastockv1.Stock{Symbol: "AC", Exchange: "TSX"}
 	if err := p.PublishStockUpdate(context.Background(), msg); err != nil {
 		t.Fatalf("PublishStockUpdate = %v, want nil", err)
 	}
@@ -47,7 +47,7 @@ func TestNewProducer_EmptyBrokers_NoDial(t *testing.T) {
 	if got, want := p.Topic, "stock.update.v1"; got != want {
 		t.Errorf("p.Topic = %q, want %q", got, want)
 	}
-	msg := &kafkastockv1.StockUpdate{Symbol: "AC", Exchange: "TSX"}
+	msg := &kafkastockv1.Stock{Symbol: "AC", Exchange: "TSX"}
 	if err := p.PublishStockUpdate(context.Background(), msg); err != nil {
 		t.Errorf("PublishStockUpdate = %v, want nil (no-op)", err)
 	}
@@ -73,7 +73,7 @@ func (f *fakeSender) Close() error { return nil }
 func TestPublish_WithFakeSender(t *testing.T) {
 	fake := &fakeSender{}
 	p := &Producer{Topic: "t", client: fake}
-	msg := &kafkastockv1.StockUpdate{Symbol: "AC", Exchange: "TSX"}
+	msg := &kafkastockv1.Stock{Symbol: "AC", Exchange: "TSX"}
 
 	if err := p.PublishStockUpdate(context.Background(), msg); err != nil {
 		t.Fatalf("PublishStockUpdate = %v, want nil", err)
@@ -96,7 +96,7 @@ func TestPublish_WithFakeSender(t *testing.T) {
 	if !ok {
 		t.Fatalf("record value type = %T, want sarama.ByteEncoder", r.Value)
 	}
-	var decoded kafkastockv1.StockUpdate
+	var decoded kafkastockv1.Stock
 	if err := proto.Unmarshal(val, &decoded); err != nil {
 		t.Fatalf("proto.Unmarshal = %v, want nil", err)
 	}

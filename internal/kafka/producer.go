@@ -10,7 +10,7 @@ import (
 	"github.com/IBM/sarama"
 	"google.golang.org/protobuf/proto"
 
-	kafkastockv1 "stocker-store/proto/v1/kafka"
+	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 
 	"github.com/anomalyco/stocker-list/internal/config"
 )
@@ -109,7 +109,7 @@ func saslMechanism(name string) sarama.SASLMechanism {
 // PublishStockUpdate marshals and enqueues a StockUpdate message for delivery
 // to the configured topic. It is a no-op (returns nil) when Kafka is disabled
 // (nil client) or when msg is nil.
-func (p *Producer) PublishStockUpdate(ctx context.Context, msg *kafkastockv1.StockUpdate) error {
+func (p *Producer) PublishStockUpdate(ctx context.Context, msg *kafkastockv1.Stock) error {
 	if p.client == nil || msg == nil {
 		return nil // no-op when Kafka is disabled
 	}
