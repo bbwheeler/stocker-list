@@ -17,10 +17,10 @@ RUN protoc \
       -I /usr/include -I proto proto/tsx/v1/tsx.proto
 
 RUN go mod tidy
-RUN CGO_ENABLED=0 go build -o /out/tsx-tracker ./cmd/server
+RUN CGO_ENABLED=0 go build -o /out/stocker-list ./cmd/server
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12
-COPY --from=build /out/tsx-tracker /tsx-tracker
+COPY --from=build /out/stocker-list /stocker-list
 EXPOSE 50051
-ENTRYPOINT ["/tsx-tracker"]
+ENTRYPOINT ["/stocker-list"]

@@ -32,6 +32,12 @@ func NewUSClient(apiKey string) *USClient {
 	// Note: I'll use a placeholder for the base URL to make it easy to override.
 }
 
+// NewUSClientForTest returns a USClient pointing at a custom base URL so
+// tests can stand up an httptest server for FMP's stock/list endpoint.
+func NewUSClientForTest(baseURL, apiKey string) *USClient {
+	return &USClient{baseURL: baseURL, apiKey: apiKey, httpClient: &http.Client{Timeout: 15 * time.Second}}
+}
+
 func (c *USClient) ListSymbols(ctx context.Context) ([]Company, error) {
 	url := fmt.Sprintf("%s?apikey=%s", c.baseURL, c.apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

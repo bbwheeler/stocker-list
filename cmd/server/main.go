@@ -34,14 +34,20 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tsxClient := provider.NewClient()
+	providers := []provider.Provider{provider.NewClient()} // TSX — no key, always on
+	if cfg.FMPAPIKey != "" {
+		providers = append(providers, provider.NewUSClient(cfg.FMPAPIKey)) // US/FMP
+	}
 
-	// Background loop that keeps the TSX symbol list fresh. Runs an
-	// immediate sync on startup, then on cfg.RefreshCheckInterval.
+	kafkaProducer, err := kafka.NewProducer(cfg)
+	if err != nil {
+		return fmt.Errorf("create kafka producer: %w", err)
+	}
+
+	// Background loop that keeps the symbol list fresh. Runs an immediate
+	// sync on startup, then on cfg.RefreshCheckInterval.
 	var wg sync.WaitGroup
-	
-	kafkaProducer := &kafka.Producer{}
-	ref := refresher.New(cfg, nil, []provider.Provider{tsxClient}, log, kafkaProducer)
+	ref := refresher.New(cfg, nil, providers, log, kafkaProducer)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -52,6 +58,10 @@ func run(log *slog.Logger) error {
 	log.Info("shutting down")
 
 	wg.Wait()
-	
+
+	if cerr := kafkaProducer.Close(); cerr != nil {
+		log.Warn("close kafka producer", "error", cerr)
+	}
+
 	return nil
 }
