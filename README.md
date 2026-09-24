@@ -2,8 +2,7 @@
 
 A Go service that pulls stock symbols from public providers and publishes them as Kafka
 `StockUpdate` protobuf messages on a refresh timer. It is a Kafka publisher driven by a
-background refresh loop — it does **not** run a gRPC server (`GRPC_PORT` is parsed and
-retained for backward compatibility only).
+background refresh loop
 
 ## Architecture
 
@@ -66,7 +65,6 @@ When `FMP_API_KEY` is empty, the US provider is disabled and the service tracks 
 
 | Name | Type | Default | Required? | Description |
 |------|------|---------|-----------|-------------|
-| `GRPC_PORT` | int | `50051` | No | Legacy port value. Parsed and retained for backward compatibility; the running service does **not** open a gRPC server today. Must be `1`–`65535` or `Load()` returns an error. |
 | `REFRESH_CHECK_INTERVAL` | Go duration string (e.g. `24h`, `12h`, `30m`) | `24h` | No | How often the background refresher pulls the symbol list and re-publishes to Kafka. Must parse and be `> 0`. |
 
 ### Kafka

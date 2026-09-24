@@ -11,9 +11,6 @@ import (
 )
 
 type Config struct {
-	// gRPC
-	GRPCPort int
-
 	// Refresh behaviour
 	RefreshCheckInterval time.Duration
 
@@ -31,8 +28,6 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		GRPCPort: getEnvInt("GRPC_PORT", 50051),
-
 		RefreshCheckInterval: getEnvDuration("REFRESH_CHECK_INTERVAL", 24*time.Hour),
 
 		KafkaBrokers:       getEnv("KAFKA_BROKERS", ""),
@@ -44,9 +39,6 @@ func Load() (*Config, error) {
 		FMPAPIKey:          getEnv("FMP_API_KEY", ""),
 	}
 
-	if cfg.GRPCPort < 1 || cfg.GRPCPort > 65535 {
-		return nil, fmt.Errorf("GRPC_PORT must be 1-65535, got %d", cfg.GRPCPort)
-	}
 	if cfg.RefreshCheckInterval <= 0 {
 		return nil, fmt.Errorf("REFRESH_CHECK_INTERVAL must be > 0, got %s", cfg.RefreshCheckInterval)
 	}

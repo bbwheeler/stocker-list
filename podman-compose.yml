@@ -14,7 +14,6 @@ services:
   tsx-evaluator:
     image: localhost/tsx-evaluator:latest
     environment:
-      GRPC_PORT: "50052"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_USER: ${DB_USER:-postgres}
@@ -39,7 +38,6 @@ services:
     build: .
     env_file: .env.podman
     environment:
-      GRPC_PORT: "50053"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_USER: ${DB_USER:-postgres}
