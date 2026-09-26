@@ -6,6 +6,7 @@ package refresher
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -67,8 +68,7 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 	for _, p := range r.providers {
 		companies, err := p.ListSymbols(ctx)
 		if err != nil {
-			r.log.Error("provider failed to list symbols", "error", err)
-			continue
+			return nil, fmt.Errorf("provider failed to list symbols: %w", err)
 		}
 		allCompanies = append(allCompanies, companies...)
 	}
@@ -78,10 +78,9 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 			msg := &kafkastockv1.Stock{
 				Symbol:   c.Symbol,
 				Exchange: c.Exchange,
-				Scores:   map[string]float64{"discovered": 1.0},
 			}
 			if err := r.producer.PublishStockUpdate(ctx, msg); err != nil {
-				r.log.Warn("failed to publish stock update", "symbol", c.Symbol, "error", err)
+				return nil, fmt.Errorf("failed to publish update for symbol %s on exchange %s: %w", c.Symbol, c.Exchange, err)
 			}
 		}
 	}
