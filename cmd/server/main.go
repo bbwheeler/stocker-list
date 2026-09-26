@@ -51,7 +51,13 @@ func run(log *slog.Logger) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ref.Run(ctx)
+		err := ref.Run(ctx)
+		if err != nil {
+			log.ErrorContext(ctx, "failed to run", "error", err)
+			cancelledContext, cancel := context.WithCancelCause(ctx)
+			ctx = cancelledContext
+			cancel(err)
+		}
 	}()
 
 	<-ctx.Done()

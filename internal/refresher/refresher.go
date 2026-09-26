@@ -31,9 +31,12 @@ func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.
 }
 
 // Run blocks, performing an immediate sync and then repeating every
-// cfg.RefreshCheckInterval, until ctx is cancelled.
-func (r *Refresher) Run(ctx context.Context) {
-	r.tick(ctx)
+// cfg.RefreshCheckInterval, until ctx is cancelled or an error occurs.
+func (r *Refresher) Run(ctx context.Context) error {
+	err := r.tick(ctx)
+	if err != nil {
+		return err
+	}
 
 	ticker := time.NewTicker(r.cfg.RefreshCheckInterval)
 	defer ticker.Stop()
@@ -41,23 +44,26 @@ func (r *Refresher) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
-			r.tick(ctx)
+			err = r.tick(ctx)
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (r *Refresher) tick(ctx context.Context) {
+func (r *Refresher) tick(ctx context.Context) error {
 	r.log.Info("refresh cycle starting")
 
 	companies, err := r.discoverAllSymbols(ctx)
 	if err != nil {
-		r.log.Error("discovering symbols failed", "error", err)
-		return
+		return fmt.Errorf("symbol discovery failed: %w", err)
 	}
 
 	r.log.Info("refresh cycle complete", "symbols", len(companies))
+	return nil
 }
 
 // discoverAllSymbols pulls the current symbol list from all providers and
