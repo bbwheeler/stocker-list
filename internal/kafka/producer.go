@@ -54,6 +54,7 @@ func NewProducer(cfg *config.Config) (*Producer, error) {
 	conf := sarama.NewConfig()
 	conf.Net.TLS.Enable = cfg.KafkaSSLEnabled
 	conf.Producer.Return.Errors = true
+	conf.Producer.Return.Successes = true
 
 	if cfg.KafkaSASLUsername != "" && cfg.KafkaSASLPassword != "" {
 		conf.Net.SASL.Enable = true
