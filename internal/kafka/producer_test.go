@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 	"google.golang.org/protobuf/proto"
 
 	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
@@ -54,15 +54,15 @@ func TestNewProducer_EmptyBrokers_NoDial(t *testing.T) {
 }
 
 // fakeSender records every message handed to it so tests can assert on the
-// produced sarama record without a real broker.
+// produced kafka-go message without a real broker.
 type fakeSender struct {
-	sent []*sarama.ProducerMessage
+	sent []kafka.Message
 	err  error
 }
 
-func (f *fakeSender) SendMessage(m *sarama.ProducerMessage) (int32, int64, error) {
-	f.sent = append(f.sent, m)
-	return 0, 0, f.err
+func (f *fakeSender) WriteMessages(ctx context.Context, msgs ...kafka.Message) error {
+	f.sent = append(f.sent, msgs...)
+	return f.err
 }
 
 func (f *fakeSender) Close() error { return nil }
@@ -79,25 +79,17 @@ func TestPublish_WithFakeSender(t *testing.T) {
 		t.Fatalf("PublishStockUpdate = %v, want nil", err)
 	}
 	if len(fake.sent) != 1 {
-		t.Fatalf("SendMessage called %d times, want 1", len(fake.sent))
+		t.Fatalf("WriteMessages called with %d messages, want 1", len(fake.sent))
 	}
 	r := fake.sent[0]
 	if r.Topic != "t" {
 		t.Errorf("record topic = %q, want %q", r.Topic, "t")
 	}
-	key, ok := r.Key.(sarama.StringEncoder)
-	if !ok {
-		t.Fatalf("record key type = %T, want sarama.StringEncoder", r.Key)
-	}
-	if string(key) != "AC" {
-		t.Errorf("record key = %q, want %q", string(key), "AC")
-	}
-	val, ok := r.Value.(sarama.ByteEncoder)
-	if !ok {
-		t.Fatalf("record value type = %T, want sarama.ByteEncoder", r.Value)
+	if string(r.Key) != "AC" {
+		t.Errorf("record key = %q, want %q", string(r.Key), "AC")
 	}
 	var decoded kafkastockv1.Stock
-	if err := proto.Unmarshal(val, &decoded); err != nil {
+	if err := proto.Unmarshal(r.Value, &decoded); err != nil {
 		t.Fatalf("proto.Unmarshal = %v, want nil", err)
 	}
 	if decoded.Symbol != "AC" {

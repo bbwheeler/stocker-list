@@ -1,5 +1,5 @@
 // Package kafka provides producers for sending stock update messages
-// to Kafka topics using the StockUpdate protobuf type from kafkastockv1.
+// to Kafka topics using the Stock protobuf type from kafkastockv1.
 package kafka
 
 import (
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/IBM/sarama"
+	"github.com/segmentio/kafka-go"
 	"google.golang.org/protobuf/proto"
 
 	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
@@ -20,11 +20,11 @@ const (
 	StockUpdateTopic = "stock.update.v1"
 )
 
-// sender is the minimal subset of a Kafka sync producer that Producer uses to
+// sender is the minimal subset of a kafka-go Writer that Producer uses to
 // deliver messages. It is unexported so that a fake can be injected in tests
 // while a nil value keeps the zero-value Producer a no-op.
 type sender interface {
-	SendMessage(*sarama.ProducerMessage) (int32, int64, error)
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
 }
 
@@ -39,7 +39,7 @@ type Producer struct {
 
 // NewProducer builds a Producer from cfg. When cfg.KafkaBrokers is empty the
 // returned Producer is a no-op (nil client, no broker dialed). Otherwise a real
-// sarama sync producer is created and returned.
+// kafka-go writer is created and returned.
 func NewProducer(cfg *config.Config) (*Producer, error) {
 	if cfg.KafkaBrokers == "" {
 		// Kafka disabled: no client, no dial.
@@ -51,24 +51,11 @@ func NewProducer(cfg *config.Config) (*Producer, error) {
 		return nil, fmt.Errorf("create kafka producer: no brokers configured")
 	}
 
-	conf := sarama.NewConfig()
-	conf.Net.TLS.Enable = cfg.KafkaSSLEnabled
-	conf.Producer.Return.Errors = true
-	conf.Producer.Return.Successes = true
+	w := kafka.NewWriter(kafka.WriterConfig{
+		Brokers: brokers,
+	})
 
-	if cfg.KafkaSASLUsername != "" && cfg.KafkaSASLPassword != "" {
-		conf.Net.SASL.Enable = true
-		conf.Net.SASL.Mechanism = saslMechanism(cfg.KafkaSASLMechanism)
-		conf.Net.SASL.User = cfg.KafkaSASLUsername
-		conf.Net.SASL.Password = cfg.KafkaSASLPassword
-	}
-
-	sp, err := sarama.NewSyncProducer(brokers, conf)
-	if err != nil {
-		return nil, fmt.Errorf("create kafka producer: %w", err)
-	}
-
-	return &Producer{Topic: topicOrDefault(cfg), client: sp}, nil
+	return &Producer{Topic: topicOrDefault(cfg), client: w}, nil
 }
 
 // topicOrDefault returns cfg.KafkaTopic if it is non-empty, otherwise
@@ -94,19 +81,6 @@ func parseBrokers(list string) []string {
 	return brokers
 }
 
-// saslMechanism maps a configuration mechanism name (case-insensitive) to the
-// sarama SASL mechanism, defaulting to PLAIN when unrecognized.
-func saslMechanism(name string) sarama.SASLMechanism {
-	switch strings.ToUpper(name) {
-	case "SCRAM-SHA-256":
-		return sarama.SASLTypeSCRAMSHA256
-	case "SCRAM-SHA-512":
-		return sarama.SASLTypeSCRAMSHA512
-	default:
-		return sarama.SASLTypePlaintext
-	}
-}
-
 // PublishStockUpdate marshals and enqueues a StockUpdate message for delivery
 // to the configured topic. It is a no-op (returns nil) when Kafka is disabled
 // (nil client) or when msg is nil.
@@ -121,12 +95,12 @@ func (p *Producer) PublishStockUpdate(ctx context.Context, msg *kafkastockv1.Sto
 	if err != nil {
 		return fmt.Errorf("marshal stock update: %w", err)
 	}
-	rec := &sarama.ProducerMessage{
+	msgOut := kafka.Message{
 		Topic: p.Topic,
-		Key:   sarama.StringEncoder(msg.Symbol),
-		Value: sarama.ByteEncoder(data),
+		Key:   []byte(msg.Symbol),
+		Value: data,
 	}
-	if _, _, err := p.client.SendMessage(rec); err != nil {
+	if err := p.client.WriteMessages(ctx, msgOut); err != nil {
 		return fmt.Errorf("publish to kafka topic %q: %w", p.Topic, err)
 	}
 	return nil
