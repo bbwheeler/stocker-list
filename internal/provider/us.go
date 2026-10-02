@@ -25,8 +25,8 @@ type fmpStock struct {
 
 func NewUSClient(apiKey string) *USClient {
 	return &USClient{
-		baseURL: "https://financialmodelingprep.com/api/v3/stock/list",
-		apiKey:  apiKey,
+		baseURL:    "https://financialmodelingprep.com/api/v3/stock/list",
+		apiKey:     apiKey,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 	// Note: I'll use a placeholder for the base URL to make it easy to override.
