@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/IBM/sarama v1.60.2
+	github.com/segmentio/kafka-go v0.4.51
 	google.golang.org/protobuf v1.36.12
 )
 
