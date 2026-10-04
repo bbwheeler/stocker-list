@@ -1,7 +1,7 @@
 # stocker-list
 
 A Go service that pulls stock symbols from public providers and publishes them as Kafka
-`StockUpdate` protobuf messages on a refresh timer. It is a Kafka publisher driven by a
+`Stock` protobuf messages on a refresh timer. It is a Kafka publisher driven by a
 background refresh loop
 
 ## Architecture
@@ -16,29 +16,27 @@ internal/kafka     Kafka producer (no-op when Kafka is disabled)
 
 ## Kafka integration
 
-The service publishes `StockUpdate` messages using protobuf serialization from
+The service publishes `Stock` messages using protobuf serialization from
 [stocker-store](https://git.wheeli.ca/brian/stocker-store).
 
-- **Message type:** `kafkastockv1.StockUpdate{Symbol, Exchange, Scores}`
+- **Message type:** `kafkastockv1.Stock{Symbol, Exchange}`
 - **Package:** `kafkastockv1`
 - **Import path:** `stocker-store/proto/v1/kafka`
 
 ```go
 import kafkastockv1 "stocker-store/proto/v1/kafka"
 
-msg := &kafkastockv1.StockUpdate{
+msg := &kafkastockv1.Stock{
     Symbol:   "AAPL",
     Exchange: "NASDAQ",
-    Scores:   map[string]float64{"momentum": 0.7},
 }
 ```
 
 - Publishing is **disabled** (a graceful no-op; no broker is ever dialed) when
   `KAFKA_BROKERS` is empty.
 - Otherwise, messages are sent to `KAFKA_TOPIC` (default `stock.update.v1`) with the stock
-  symbol as the message key, using optional SASL (enabled only when **both**
-  `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` are non-empty; `PLAIN`, `SCRAM-SHA-256`,
-  or `SCRAM-SHA-512`) and optional TLS per `KAFKA_SSL_ENABLED`.
+  symbol as the message key, over a **plaintext** connection. Brokers must be reachable
+  plaintext: **SASL and TLS are not supported**.
 
 ## Providers
 
@@ -71,12 +69,8 @@ When `FMP_API_KEY` is empty, the US provider is disabled and the service tracks 
 
 | Name | Type | Default | Required? | Description |
 |------|------|---------|-----------|-------------|
-| `KAFKA_BROKERS` | comma-separated `host:port` list (e.g. `kafka1:9093,kafka2:9093`) | empty | No | Kafka brokers to publish to. **Empty = Kafka disabled → the producer is a graceful no-op** (no broker is ever dialed). |
+| `KAFKA_BROKERS` | comma-separated `host:port` list (e.g. `kafka1:9093,kafka2:9093`) | empty | No | Kafka brokers to publish to (**plaintext only**). **Empty = Kafka disabled → the producer is a graceful no-op** (no broker is ever dialed). |
 | `KAFKA_TOPIC` | string | `stock.update.v1` | No | Topic published to. Empty/absent falls back to `stock.update.v1`. |
-| `KAFKA_SASL_USERNAME` | string | empty | No | SASL username. SASL is enabled **only when both this and `KAFKA_SASL_PASSWORD` are non-empty**; otherwise SASL is disabled. |
-| `KAFKA_SASL_PASSWORD` | string | empty | No | SASL password. Required (together with a non-empty username) to enable SASL. |
-| `KAFKA_SASL_MECHANISM` | string | `PLAIN` | No | SASL mechanism. One of `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. (Accepted case-insensitively.) |
-| `KAFKA_SSL_ENABLED` | bool | `true` | No | Enable TLS for Kafka connections. Parsed as `true`/`false`. |
 
 ### Provider
 
