@@ -54,16 +54,12 @@ func TestLoad_KafkaDefaults(t *testing.T) {
 	if cfg.KafkaTopic != "stock.update.v1" {
 		t.Errorf("KafkaTopic = %q, want %q", cfg.KafkaTopic, "stock.update.v1")
 	}
-	if cfg.FMPAPIKey != "" {
-		t.Errorf("FMPAPIKey = %q, want empty", cfg.FMPAPIKey)
-	}
 }
 
 func TestLoad_KafkaCustom(t *testing.T) {
 	env := map[string]string{
 		"KAFKA_BROKERS": "kafka1:9093,kafka2:9093",
 		"KAFKA_TOPIC":   "stock.other",
-		"FMP_API_KEY":   "fmpkey123",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
@@ -78,8 +74,5 @@ func TestLoad_KafkaCustom(t *testing.T) {
 	}
 	if cfg.KafkaTopic != "stock.other" {
 		t.Errorf("KafkaTopic = %q, want %q", cfg.KafkaTopic, "stock.other")
-	}
-	if cfg.FMPAPIKey != "fmpkey123" {
-		t.Errorf("FMPAPIKey = %q, want %q", cfg.FMPAPIKey, "fmpkey123")
 	}
 }

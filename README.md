@@ -51,11 +51,15 @@ TSX-listed companies. The service holds no symbol list of its own between cycles
 cycle the provider's full current TSX list is fetched fresh and re-published to Kafka, so
 what is published always reflects the provider's live listings.
 
-### US (Financial Modeling Prep)
+### US (NASDAQ screener)
 
-The US provider uses
-`https://financialmodelingprep.com/api/v3/stock/list` and **requires** `FMP_API_KEY`.
-When `FMP_API_KEY` is empty, the US provider is disabled and the service tracks TSX only.
+The US provider uses the **public NASDAQ screener API** — `api.nasdaq.com/api/screener/stocks`
+(the endpoint that powers the nasdaq.com web app). It returns the full set of US common
+stocks (NYSE, NASDAQ, NYSE American) as a single JSON payload and **requires no API key**.
+The US provider is always active, alongside TSX.
+
+Note: the API does not expose a per-row exchange or currency field, so the provider maps
+every US symbol to `Exchange: "US"` and `Currency: "USD"` (safe for this all-US, USD universe).
 
 ## Environment variables
 
@@ -72,18 +76,11 @@ When `FMP_API_KEY` is empty, the US provider is disabled and the service tracks 
 | `KAFKA_BROKERS` | comma-separated `host:port` list (e.g. `kafka1:9093,kafka2:9093`) | empty | No | Kafka brokers to publish to (**plaintext only**). **Empty = Kafka disabled → the producer is a graceful no-op** (no broker is ever dialed). |
 | `KAFKA_TOPIC` | string | `stock.update.v1` | No | Topic published to. Empty/absent falls back to `stock.update.v1`. |
 
-### Provider
-
-| Name | Type | Default | Required? | Description |
-|------|------|---------|-----------|-------------|
-| `FMP_API_KEY` | string | empty | No | Financial Modeling Prep API key. **Empty = US provider disabled (TSX-only).** When set, the US provider is added to the refresh loop. |
-
 **Key semantics:**
 
 - `KAFKA_BROKERS` empty ⇒ Kafka disabled: the service still runs the refresh loop, but the
   producer is a no-op (no broker is dialed, nothing is published).
-- `FMP_API_KEY` empty ⇒ US provider disabled: only the TSX provider runs. With it set, both
-  TSX and US run.
+- Both providers (TSX and US) are active by default; neither requires an API key.
 
 ## Running it
 
@@ -94,9 +91,8 @@ make build     # produces bin/stocker-list
 make run       # or: go run ./cmd/server
 ```
 
-Set the environment variables above in the process environment (see `.env.example`). Kafka
-and the US provider are opt-in via their env vars: with `KAFKA_BROKERS` empty publishing is
-a no-op, and with `FMP_API_KEY` empty only the TSX provider runs.
+Set the environment variables above in the process environment (see `.env.example`). With
+`KAFKA_BROKERS` empty publishing is a no-op; both providers (TSX and US) run unconditionally.
 
 ### Podman (podman-compose)
 
@@ -118,7 +114,7 @@ Deployment facts: **image** `git.wheeli.ca/brian/stocker-list:latest`, **service
    make quadlet-install
    ```
 
-2. Fill in the environment file (set `KAFKA_*` and `FMP_API_KEY` as needed):
+2. Fill in the environment file (set `KAFKA_*` as needed):
 
    ```
    $EDITOR ~/.config/stocker-list/.env.podman
