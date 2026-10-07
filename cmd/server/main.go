@@ -34,9 +34,9 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	providers := []provider.Provider{provider.NewClient()} // TSX — no key, always on
-	if cfg.FMPAPIKey != "" {
-		providers = append(providers, provider.NewUSClient(cfg.FMPAPIKey)) // US/FMP
+	providers := []provider.Provider{
+		provider.NewClient(),   // TSX — no key, always on
+		provider.NewUSClient(), // US — NASDAQ screener, no key, always on
 	}
 
 	kafkaProducer, err := kafka.NewProducer(cfg)

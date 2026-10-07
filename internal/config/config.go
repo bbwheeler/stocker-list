@@ -17,9 +17,6 @@ type Config struct {
 	// Kafka
 	KafkaBrokers string
 	KafkaTopic   string
-
-	// Provider (US / FMP)
-	FMPAPIKey string
 }
 
 func Load() (*Config, error) {
@@ -28,7 +25,6 @@ func Load() (*Config, error) {
 
 		KafkaBrokers: getEnv("KAFKA_BROKERS", ""),
 		KafkaTopic:   getEnv("KAFKA_TOPIC", "stock.update.v1"),
-		FMPAPIKey:    getEnv("FMP_API_KEY", ""),
 	}
 
 	if cfg.RefreshCheckInterval <= 0 {
