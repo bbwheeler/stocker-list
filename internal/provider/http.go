@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	// maxResponseBodySize caps how much of a single response body we will read.
+	// maxBodySize caps how much of a single response body we will read.
 	// A bounded read prevents a huge HTML error page from exhausting memory.
-	maxResponseBodySize = 20 << 20
+	maxBodySize = 20 << 20
 	// bodyPreviewLimit is the maximum number of body bytes included in errors.
 	bodyPreviewLimit = 512
 	// maxRedirects is the maximum number of redirects followed per request.
@@ -42,12 +42,12 @@ func getJSON(ctx context.Context, client *http.Client, url string, dst any) erro
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize+1))
 	if err != nil {
 		return fmt.Errorf("read response from %s: %w", url, err)
 	}
-	if len(body) > maxResponseBodySize {
-		return fmt.Errorf("response from %s exceeds %d bytes", url, maxResponseBodySize)
+	if len(body) > maxBodySize {
+		return fmt.Errorf("response from %s exceeds %d bytes", url, maxBodySize)
 	}
 
 	contentType := resp.Header.Get("Content-Type")

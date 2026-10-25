@@ -5,9 +5,7 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -31,13 +29,6 @@ const (
 // field per row — the exchange a symbol belongs to is derived from which
 // `exchange=` filter produced it.
 var defaultExchanges = []string{"NASDAQ", "NYSE", "AMEX"}
-
-// userAgent is required by api.nasdaq.com; requests without a browser-like
-// User-Agent header are rejected.
-const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-// maxBodySize caps how much of a single response body we will read.
-const maxBodySize = 20 << 20
 
 type USClient struct {
 	baseURL    string
@@ -63,9 +54,12 @@ type nasdaqRow struct {
 
 func NewUSClient() *USClient {
 	return &USClient{
-		baseURL:    nasdaqBaseURL,
-		exchanges:  defaultExchanges,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:   nasdaqBaseURL,
+		exchanges: defaultExchanges,
+		httpClient: &http.Client{
+			Timeout:       30 * time.Second,
+			CheckRedirect: limitRedirects,
+		},
 	}
 }
 
@@ -73,9 +67,12 @@ func NewUSClient() *USClient {
 // tests can stand up an httptest server that mimics the NASDAQ endpoint.
 func NewUSClientForTest(baseURL string) *USClient {
 	return &USClient{
-		baseURL:    baseURL,
-		exchanges:  defaultExchanges,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL:   baseURL,
+		exchanges: defaultExchanges,
+		httpClient: &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: limitRedirects,
+		},
 	}
 }
 
@@ -135,26 +132,9 @@ func (c *USClient) fetchExchange(ctx context.Context, exchange string) ([]nasdaq
 
 // fetchPage performs a single screener GET and decodes the page of rows.
 func (c *USClient) fetchPage(ctx context.Context, url string) ([]nasdaqRow, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch US symbols: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("NASDAQ returned HTTP %d", resp.StatusCode)
-	}
-
 	var pag nasdaqResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodySize)).Decode(&pag); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+	if err := getJSON(ctx, c.httpClient, url, &pag); err != nil {
+		return nil, fmt.Errorf("fetch US symbols: %w", err)
 	}
 	return pag.Data.Table.Rows, nil
 }
