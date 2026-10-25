@@ -61,6 +61,35 @@ The US provider is always active, alongside TSX.
 Note: the API does not expose a per-row exchange or currency field, so the provider maps
 every US symbol to `Exchange: "US"` and `Currency: "USD"` (safe for this all-US, USD universe).
 
+### Response validation and graceful degradation
+
+Both providers validate the HTTP response before decoding it as JSON. A non-200 status, or a
+non-JSON `Content-Type` when one is present (for example, an HTML maintenance or error page
+served with HTTP 200), is reported as a provider failure instead of being passed to the JSON
+decoder. The error contains the URL, the HTTP status, the `Content-Type`, and a body preview
+of up to 512 bytes (whitespace-collapsed), so the real cause is visible in the logs. Requests
+send a browser `User-Agent` and `Accept: application/json`, read at most 20 MiB per response,
+and fail with `stopped after 5 redirects` when a redirect chain reaches the limit.
+
+A provider failure does not stop the service:
+
+- The failure is logged at error level as `provider failed to list symbols`, with the provider
+  type and the full error.
+- The cycle continues with the remaining providers, and the symbols they return are still
+  published to Kafka.
+- The cycle then logs `refresh cycle completed with provider failures` with the number of
+  symbols collected (`symbols`) and the number of failed providers (`failed_providers`).
+- The next refresh interval retries every provider, so a temporarily unavailable provider (for
+  example, a TMX maintenance page) recovers automatically without a restart.
+
+Provider failures are never fatal: the refresher keeps running, and the only refresh failure it
+treats as an error is a Kafka publish failure. Provider base URLs are compile-time constants
+(`defaultBaseURL` in `internal/provider/tsx.go` and `nasdaqBaseURL` in `internal/provider/us.go`);
+they cannot be changed with an environment variable or config file.
+
+See [`docs/plans/symbol-discovery-html-response.md`](docs/plans/symbol-discovery-html-response.md)
+for the incident analysis behind this behavior.
+
 ## Environment variables
 
 ### Core
