@@ -1,12 +1,15 @@
 package refresher_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +100,63 @@ func TestRun_PublishesSymbols(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not exit after context cancellation")
+	}
+}
+
+type errorProvider struct {
+	err error
+}
+
+func (p errorProvider) ListSymbols(context.Context) ([]provider.Company, error) {
+	return nil, p.err
+}
+
+type countingProvider struct {
+	calls int
+}
+
+func (p *countingProvider) ListSymbols(context.Context) ([]provider.Company, error) {
+	p.calls++
+	return []provider.Company{{Symbol: "AC", Exchange: "TSX"}}, nil
+}
+
+func TestRun_ProviderFailureDoesNotStopLoop(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	healthy := &countingProvider{}
+	providers := []provider.Provider{
+		errorProvider{err: errors.New(`unexpected Content-Type "text/html"`)},
+		healthy,
+	}
+	ref := refresher.New(testConfig(), nil, providers, log, &kafka.Producer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		ref.Run(ctx)
+		close(done)
+	}()
+
+	// Give the immediate tick time to run. The failing provider must not make
+	// Run exit.
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("Run exited after one provider failed; want it to keep running")
+	default:
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not exit after context cancellation")
+	}
+
+	if healthy.calls == 0 {
+		t.Error("healthy provider was not called")
+	}
+	if !strings.Contains(logs.String(), "provider failed to list symbols") {
+		t.Errorf("logs do not mention the provider failure: %s", logs.String())
 	}
 }
