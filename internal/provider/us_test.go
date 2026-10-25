@@ -228,3 +228,52 @@ func TestUS_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
+
+func TestUS_HTMLInsteadOfJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "<!DOCTYPE html><html><body>Access denied</body></html>")
+	}))
+	defer srv.Close()
+
+	c := NewUSClientForTest(srv.URL)
+	_, err := c.ListSymbols(context.Background())
+	if err == nil {
+		t.Fatal("ListSymbols succeeded for an HTML response; want an error")
+	}
+	for _, want := range []string{
+		"unexpected Content-Type",
+		"text/html",
+		"HTTP 200",
+		"Access denied",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestUS_RedirectToHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/blocked" {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "<!DOCTYPE html><html><body>blocked</body></html>")
+			return
+		}
+		http.Redirect(w, r, "/blocked", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewUSClientForTest(srv.URL)
+	_, err := c.ListSymbols(context.Background())
+	if err == nil {
+		t.Fatal("ListSymbols succeeded for a redirect to HTML; want an error")
+	}
+	for _, want := range []string{"unexpected Content-Type", "text/html", "blocked"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}

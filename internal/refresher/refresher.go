@@ -12,9 +12,15 @@ import (
 
 	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 	"github.com/anomalyco/stocker-list/internal/config"
-	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
 )
+
+// Producer delivers StockUpdate messages. It is the subset of
+// *kafka.Producer the refresher needs; declaring it as an interface lets
+// tests observe publishes and publish failures without a Kafka broker.
+type Producer interface {
+	PublishStockUpdate(ctx context.Context, msg *kafkastockv1.Stock) error
+}
 
 type Refresher struct {
 	cfg *config.Config
@@ -23,10 +29,10 @@ type Refresher struct {
 	repo      any
 	providers []provider.Provider
 	log       *slog.Logger
-	producer  *kafka.Producer
+	producer  Producer
 }
 
-func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.Logger, producer *kafka.Producer) *Refresher {
+func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.Logger, producer Producer) *Refresher {
 	return &Refresher{cfg: cfg, repo: repo, providers: providers, log: log, producer: producer}
 }
 
@@ -57,24 +63,34 @@ func (r *Refresher) Run(ctx context.Context) error {
 func (r *Refresher) tick(ctx context.Context) error {
 	r.log.Info("refresh cycle starting")
 
-	companies, err := r.discoverAllSymbols(ctx)
+	companies, failed, err := r.discoverAllSymbols(ctx)
 	if err != nil {
 		return fmt.Errorf("symbol discovery failed: %w", err)
 	}
-
-	r.log.Info("refresh cycle complete", "symbols", len(companies))
+	if failed > 0 {
+		r.log.Warn("refresh cycle completed with provider failures",
+			"symbols", len(companies), "failed_providers", failed)
+	} else {
+		r.log.Info("refresh cycle complete", "symbols", len(companies))
+	}
 	return nil
 }
 
 // discoverAllSymbols pulls the current symbol list from all providers and
 // publishes a StockUpdate message to Kafka for every symbol discovered.
-func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company, error) {
+// A failure from one provider is logged and does not prevent the remaining
+// providers from being used; the cycle still succeeds.
+func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company, int, error) {
 	var allCompanies []provider.Company
+	var failed int
 
 	for _, p := range r.providers {
 		companies, err := p.ListSymbols(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("provider failed to list symbols: %w", err)
+			failed++
+			r.log.Error("provider failed to list symbols",
+				"provider", fmt.Sprintf("%T", p), "error", err)
+			continue
 		}
 		allCompanies = append(allCompanies, companies...)
 	}
@@ -86,10 +102,10 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 				Exchange: c.Exchange,
 			}
 			if err := r.producer.PublishStockUpdate(ctx, msg); err != nil {
-				return nil, fmt.Errorf("failed to publish update for symbol %s on exchange %s: %w", c.Symbol, c.Exchange, err)
+				return nil, failed, fmt.Errorf("failed to publish update for symbol %s on exchange %s: %w", c.Symbol, c.Exchange, err)
 			}
 		}
 	}
 
-	return allCompanies, nil
+	return allCompanies, failed, nil
 }

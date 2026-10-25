@@ -5,9 +5,7 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -30,8 +28,11 @@ type Client struct {
 
 func NewClient() *Client {
 	return &Client{
-		baseURL:    defaultBaseURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL: defaultBaseURL,
+		httpClient: &http.Client{
+			Timeout:       30 * time.Second,
+			CheckRedirect: limitRedirects,
+		},
 	}
 }
 
@@ -39,34 +40,20 @@ func NewClient() *Client {
 // Used in tests to mock the TEX API.
 func NewClientForTest(baseURL string) *Client {
 	return &Client{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: limitRedirects,
+		},
 	}
 }
 
 // ListSymbols returns every stock symbol listed on the Toronto Stock
 // Exchange (TSX) by querying the official TMX company directory.
 func (c *Client) ListSymbols(ctx context.Context) ([]Company, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch TSX symbols: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("TMX returned HTTP %d", resp.StatusCode)
-	}
-
-	const maxBodySize = 20 << 20
 	var tsxResp tsxResponse
-	dec := json.NewDecoder(io.LimitReader(resp.Body, maxBodySize))
-	if err := dec.Decode(&tsxResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+	if err := getJSON(ctx, c.httpClient, c.baseURL, &tsxResp); err != nil {
+		return nil, fmt.Errorf("fetch TSX symbols: %w", err)
 	}
 
 	out := make([]Company, 0, len(tsxResp.Results))
