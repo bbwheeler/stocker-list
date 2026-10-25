@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +101,55 @@ func TestListSymbols_ContextCancelled(t *testing.T) {
 	_, err := c.ListSymbols(ctx)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestListSymbols_HTMLInsteadOfJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "<!DOCTYPE html><html><body>Our websites are currently unavailable.</body></html>")
+	}))
+	defer srv.Close()
+
+	c := NewClientForTest(srv.URL)
+	_, err := c.ListSymbols(context.Background())
+	if err == nil {
+		t.Fatal("ListSymbols succeeded for an HTML response; want an error")
+	}
+	for _, want := range []string{
+		"unexpected Content-Type",
+		"text/html",
+		"HTTP 200",
+		"Our websites are currently unavailable",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "invalid character '<'") {
+		t.Errorf("error still surfaces the raw JSON syntax error: %v", err)
+	}
+}
+
+func TestListSymbols_RedirectLimit(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, srv.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewClientForTest(srv.URL)
+	_, err := c.ListSymbols(context.Background())
+	if err == nil {
+		t.Fatal("ListSymbols succeeded for a redirect loop; want an error")
+	}
+	// The default Go policy stops after 10 redirects; the client must use the
+	// shared limitRedirects policy instead.
+	for _, want := range []string{"redirect", "stopped after 5 redirects"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
 	}
 }
 
