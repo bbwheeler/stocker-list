@@ -1,11 +1,15 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestGetJSON_HTMLResponse(t *testing.T) {
@@ -100,6 +104,92 @@ func TestGetJSON_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestGetJSON_BodyTooLarge(t *testing.T) {
+	body := bytes.Repeat([]byte("a"), maxBodySize+1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	var dst map[string]any
+	err := getJSON(context.Background(), srv.Client(), srv.URL, &dst)
+	if err == nil {
+		t.Fatal("getJSON succeeded for an oversized body; want an error")
+	}
+	for _, want := range []string{srv.URL, fmt.Sprintf("exceeds %d bytes", maxBodySize)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+// TestGetJSON_RedirectBodyNotDecoded verifies a 3xx response that the client
+// does not follow (no Location header) can never reach the JSON decoder, even
+// when its body is well-formed JSON.
+func TestGetJSON_RedirectBodyNotDecoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusFound)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	var dst map[string]any
+	err := getJSON(context.Background(), srv.Client(), srv.URL, &dst)
+	if err == nil {
+		t.Fatal("getJSON succeeded for HTTP 302; want an error")
+	}
+	for _, want := range []string{srv.URL, "unexpected HTTP 302"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if dst != nil {
+		t.Errorf("dst was populated from a 3xx body: %v", dst)
+	}
+}
+
+// roundTripFunc is a stub http.RoundTripper for responses httptest cannot
+// produce, such as a 200 with no Content-Type header at all.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestGetJSON_EmptyContentTypeAllowsDecode documents the intentional policy
+// that a missing Content-Type is allowed through to the JSON decoder, and
+// that the resulting decode error still carries the URL, status, and body
+// preview.
+func TestGetJSON_EmptyContentTypeAllowsDecode(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    r,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`<html>maintenance</html>`)),
+		}, nil
+	})}
+
+	var dst map[string]any
+	err := getJSON(context.Background(), client, "http://example.test/data", &dst)
+	if err == nil {
+		t.Fatal("getJSON succeeded for an HTML body with no Content-Type; want an error")
+	}
+	for _, want := range []string{
+		"http://example.test/data",
+		"decode JSON",
+		"HTTP 200",
+		"<html>maintenance</html>",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "unexpected Content-Type") {
+		t.Errorf("error %q rejects an empty Content-Type; it should be allowed through: %v", err, err)
+	}
+}
+
 func TestIsJSONContentType(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
@@ -107,12 +197,22 @@ func TestIsJSONContentType(t *testing.T) {
 	}{
 		{"application/json", true},
 		{"application/json; charset=utf-8", true},
+		{"application/json;charset=utf-8", true},
+		{"application/vnd.api+json", true},
 		{"application/problem+json", true},
 		{"text/json", true},
+		// Media types are case-insensitive and may be padded with spaces.
+		{"APPLICATION/JSON", true},
+		{"Application/JSON; Charset=UTF-8", true},
+		{"  application/json  ", true},
 		{"text/html", false},
+		{"TEXT/HTML", false},
+		{"text/html; charset=utf-8", false},
 		{"application/xml", false},
 		{"", false},
 		{"not a mime type", false},
+		// A malformed parameter fails the parse; reject rather than guess.
+		{"application/json; charset", false},
 	} {
 		if got := isJSONContentType(tc.in); got != tc.want {
 			t.Errorf("isJSONContentType(%q) = %v, want %v", tc.in, got, tc.want)
@@ -130,6 +230,28 @@ func TestBodyPreview(t *testing.T) {
 		t.Errorf("bodyPreview did not mark truncation: %q", preview)
 	}
 	if got := len(preview); got > bodyPreviewLimit+len("...") {
+		t.Errorf("bodyPreview returned %d bytes, want at most %d", got, bodyPreviewLimit+len("..."))
+	}
+
+	// The cut must not slice through a multi-byte rune: 512 is not a rune
+	// boundary for the 3-byte "€", so the naive prefix ends mid-character.
+	multi := bodyPreview([]byte(strings.Repeat("€", 400)))
+	if !strings.HasSuffix(multi, "...") {
+		t.Errorf("bodyPreview did not mark truncation: %q", multi)
+	}
+	if !utf8.ValidString(multi) {
+		t.Errorf("bodyPreview of a multi-byte body is not valid UTF-8: %q", multi)
+	}
+	if got := len(multi); got > bodyPreviewLimit+len("...") {
+		t.Errorf("bodyPreview returned %d bytes, want at most %d", got, bodyPreviewLimit+len("..."))
+	}
+
+	// A body that is not valid UTF-8 must still produce a bounded preview.
+	invalid := bodyPreview([]byte(strings.Repeat("\xE9a", 500)))
+	if !strings.HasSuffix(invalid, "...") {
+		t.Errorf("bodyPreview did not mark truncation: %q", invalid)
+	}
+	if got := len(invalid); got > bodyPreviewLimit+len("...") {
 		t.Errorf("bodyPreview returned %d bytes, want at most %d", got, bodyPreviewLimit+len("..."))
 	}
 }
