@@ -12,9 +12,15 @@ import (
 
 	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 	"github.com/anomalyco/stocker-list/internal/config"
-	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
 )
+
+// Producer delivers StockUpdate messages. It is the subset of
+// *kafka.Producer the refresher needs; declaring it as an interface lets
+// tests observe publishes and publish failures without a Kafka broker.
+type Producer interface {
+	PublishStockUpdate(ctx context.Context, msg *kafkastockv1.Stock) error
+}
 
 type Refresher struct {
 	cfg *config.Config
@@ -23,10 +29,10 @@ type Refresher struct {
 	repo      any
 	providers []provider.Provider
 	log       *slog.Logger
-	producer  *kafka.Producer
+	producer  Producer
 }
 
-func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.Logger, producer *kafka.Producer) *Refresher {
+func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.Logger, producer Producer) *Refresher {
 	return &Refresher{cfg: cfg, repo: repo, providers: providers, log: log, producer: producer}
 }
 
