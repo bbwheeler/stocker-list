@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
+	stockstorev1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 	"github.com/anomalyco/stocker-list/internal/config"
-	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
+	"github.com/anomalyco/stocker-list/internal/rabbitmq"
 	"github.com/anomalyco/stocker-list/internal/refresher"
 )
 
@@ -56,7 +56,7 @@ func TestRun_ExitsOnCancel(t *testing.T) {
 
 	p := provider.NewClientForTest(srv.URL)
 	log := testLog(t)
-	ref := refresher.New(testConfig(), nil, []provider.Provider{p}, log, &kafka.Producer{})
+	ref := refresher.New(testConfig(), nil, []provider.Provider{p}, log, &rabbitmq.Producer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -76,14 +76,14 @@ func TestRun_ExitsOnCancel(t *testing.T) {
 }
 
 // TestRun_PublishesSymbols verifies the refresher drives every provider and
-// pushes each discovered symbol through the Kafka producer without error.
+// pushes each discovered symbol through the RabbitMQ producer without error.
 func TestRun_PublishesSymbols(t *testing.T) {
 	srv := symbolsHandler(t, []string{"AC", "RY", "TD"})
 	defer srv.Close()
 
 	p := provider.NewClientForTest(srv.URL)
 	log := testLog(t)
-	producer := &kafka.Producer{Topic: kafka.StockUpdateTopic}
+	producer := &rabbitmq.Producer{}
 	ref := refresher.New(testConfig(), nil, []provider.Provider{p}, log, producer)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,15 +125,15 @@ func (p *countingProvider) ListSymbols(context.Context) ([]provider.Company, err
 }
 
 // fakeProducer records published messages so tests can assert what the
-// refresher sent without a Kafka broker, and can fail publishes on demand.
+// refresher sent without a RabbitMQ broker, and can fail publishes on demand.
 // The mutex lets tests poll publishes while Run is still executing.
 type fakeProducer struct {
 	mu   sync.Mutex
-	msgs []*kafkastockv1.Stock
+	msgs []*stockstorev1.Stock
 	err  error
 }
 
-func (f *fakeProducer) PublishStockUpdate(_ context.Context, msg *kafkastockv1.Stock) error {
+func (f *fakeProducer) PublishStockUpdate(_ context.Context, msg *stockstorev1.Stock) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.msgs = append(f.msgs, msg)
@@ -141,10 +141,10 @@ func (f *fakeProducer) PublishStockUpdate(_ context.Context, msg *kafkastockv1.S
 }
 
 // published returns the messages published so far.
-func (f *fakeProducer) published() []*kafkastockv1.Stock {
+func (f *fakeProducer) published() []*stockstorev1.Stock {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]*kafkastockv1.Stock(nil), f.msgs...)
+	return append([]*stockstorev1.Stock(nil), f.msgs...)
 }
 
 func TestRun_ProviderFailureDoesNotStopLoop(t *testing.T) {
@@ -198,13 +198,13 @@ func TestRun_ProviderFailureDoesNotStopLoop(t *testing.T) {
 	}
 }
 
-// TestRun_PublishFailureSurfacesError verifies a Kafka publish failure is
+// TestRun_PublishFailureSurfacesError verifies a RabbitMQ publish failure is
 // still treated as fatal: Run returns the wrapped error instead of logging
 // and continuing.
 func TestRun_PublishFailureSurfacesError(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	healthy := &countingProvider{}
-	producer := &fakeProducer{err: errors.New("kafka unavailable")}
+	producer := &fakeProducer{err: errors.New("rabbitmq unavailable")}
 	ref := refresher.New(testConfig(), nil, []provider.Provider{healthy}, log, producer)
 
 	err := ref.Run(context.Background())
@@ -214,7 +214,7 @@ func TestRun_PublishFailureSurfacesError(t *testing.T) {
 	for _, want := range []string{
 		"symbol discovery failed",
 		"failed to publish update for symbol AC",
-		"kafka unavailable",
+		"rabbitmq unavailable",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)

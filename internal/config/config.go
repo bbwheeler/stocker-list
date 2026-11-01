@@ -15,10 +15,6 @@ type Config struct {
 	// Refresh behaviour
 	RefreshCheckInterval time.Duration
 
-	// Kafka
-	KafkaBrokers string
-	KafkaTopic   string
-
 	// RabbitMQ
 	RabbitMQURL          string
 	RabbitMQExchange     string
@@ -29,9 +25,6 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		RefreshCheckInterval: getEnvDuration("REFRESH_CHECK_INTERVAL", 24*time.Hour),
-
-		KafkaBrokers: getEnv("KAFKA_BROKERS", ""),
-		KafkaTopic:   getEnv("KAFKA_TOPIC", "stock.update.v1"),
 
 		RabbitMQURL:          getEnvPreserveEmpty("RABBITMQ_URL", "amqp://guest:guest@192.168.1.48:5672/"),
 		RabbitMQExchange:     getEnv("RABBITMQ_EXCHANGE", "stock.update"),

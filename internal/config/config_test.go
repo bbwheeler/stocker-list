@@ -45,40 +45,6 @@ func TestLoad_InvalidDuration(t *testing.T) {
 	}
 }
 
-func TestLoad_KafkaDefaults(t *testing.T) {
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.KafkaBrokers != "" {
-		t.Errorf("KafkaBrokers = %q, want empty", cfg.KafkaBrokers)
-	}
-	if cfg.KafkaTopic != "stock.update.v1" {
-		t.Errorf("KafkaTopic = %q, want %q", cfg.KafkaTopic, "stock.update.v1")
-	}
-}
-
-func TestLoad_KafkaCustom(t *testing.T) {
-	env := map[string]string{
-		"KAFKA_BROKERS": "kafka1:9093,kafka2:9093",
-		"KAFKA_TOPIC":   "stock.other",
-	}
-	for k, v := range env {
-		t.Setenv(k, v)
-	}
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.KafkaBrokers != "kafka1:9093,kafka2:9093" {
-		t.Errorf("KafkaBrokers = %q, want %q", cfg.KafkaBrokers, "kafka1:9093,kafka2:9093")
-	}
-	if cfg.KafkaTopic != "stock.other" {
-		t.Errorf("KafkaTopic = %q, want %q", cfg.KafkaTopic, "stock.other")
-	}
-}
-
 var rabbitMQEnvKeys = []string{
 	"RABBITMQ_URL",
 	"RABBITMQ_EXCHANGE",

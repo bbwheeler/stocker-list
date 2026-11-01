@@ -1,6 +1,6 @@
 // Package refresher runs a background loop that keeps the tracked stock
 // symbol list up to date. Each cycle it pulls the latest symbols from the
-// configured providers and publishes a StockUpdate message to Kafka for
+// configured providers and publishes a StockUpdate message to RabbitMQ for
 // every tracked symbol.
 package refresher
 
@@ -10,22 +10,23 @@ import (
 	"log/slog"
 	"time"
 
-	kafkastockv1 "git.wheeli.ca/brian/stocker-store/proto/v1"
+	stockstorev1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/provider"
 )
 
 // Producer delivers StockUpdate messages. It is the subset of
-// *kafka.Producer the refresher needs; declaring it as an interface lets
-// tests observe publishes and publish failures without a Kafka broker.
+// *rabbitmq.Producer the refresher needs; declaring it as an interface lets
+// tests observe publishes and publish failures without a RabbitMQ broker.
 type Producer interface {
-	PublishStockUpdate(ctx context.Context, msg *kafkastockv1.Stock) error
+	PublishStockUpdate(ctx context.Context, msg *stockstorev1.Stock) error
 }
 
 type Refresher struct {
 	cfg *config.Config
-	// repo is the (optional) persistence sink. It is nil in Kafka-only mode,
-	// where discovered symbols are published upstream instead of stored locally.
+	// repo is the (optional) persistence sink. It is nil in publish-only mode,
+	// where discovered symbols are published upstream instead of persisted
+	// locally.
 	repo      any
 	providers []provider.Provider
 	log       *slog.Logger
@@ -77,7 +78,7 @@ func (r *Refresher) tick(ctx context.Context) error {
 }
 
 // discoverAllSymbols pulls the current symbol list from all providers and
-// publishes a StockUpdate message to Kafka for every symbol discovered.
+// publishes a StockUpdate message to RabbitMQ for every symbol discovered.
 // A failure from one provider is logged and does not prevent the remaining
 // providers from being used; the cycle still succeeds.
 func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company, int, error) {
@@ -97,7 +98,7 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 
 	if r.producer != nil {
 		for _, c := range allCompanies {
-			msg := &kafkastockv1.Stock{
+			msg := &stockstorev1.Stock{
 				Symbol:   c.Symbol,
 				Exchange: c.Exchange,
 			}

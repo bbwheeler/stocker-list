@@ -6,7 +6,7 @@ import (
 
 // Company is the canonical record of a tracked stock symbol. It is
 // provider-local so the provider layer has no dependency on persistence
-// internals and can be consumed directly by the Kafka producer.
+// internals and can be consumed directly by the RabbitMQ producer.
 type Company struct {
 	Symbol   string
 	Name     string
