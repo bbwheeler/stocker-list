@@ -1,4 +1,4 @@
-// Command stocker-list manages lifecycle for pulling stock data and publishing to Kafka.
+// Command stocker-list manages lifecycle for pulling stock data and publishing to RabbitMQ.
 package main
 
 import (
@@ -11,8 +11,8 @@ import (
 	"syscall"
 
 	"github.com/anomalyco/stocker-list/internal/config"
-	"github.com/anomalyco/stocker-list/internal/kafka"
 	"github.com/anomalyco/stocker-list/internal/provider"
+	"github.com/anomalyco/stocker-list/internal/rabbitmq"
 	"github.com/anomalyco/stocker-list/internal/refresher"
 )
 
@@ -39,15 +39,15 @@ func run(log *slog.Logger) error {
 		provider.NewUSClient(), // US — NASDAQ screener, no key, always on
 	}
 
-	kafkaProducer, err := kafka.NewProducer(cfg)
+	producer, err := rabbitmq.NewProducer(cfg, log)
 	if err != nil {
-		return fmt.Errorf("create kafka producer: %w", err)
+		return fmt.Errorf("create rabbitmq producer: %w", err)
 	}
 
 	// Background loop that keeps the symbol list fresh. Runs an immediate
 	// sync on startup, then on cfg.RefreshCheckInterval.
 	var wg sync.WaitGroup
-	ref := refresher.New(cfg, nil, providers, log, kafkaProducer)
+	ref := refresher.New(cfg, nil, providers, log, producer)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -65,8 +65,8 @@ func run(log *slog.Logger) error {
 
 	wg.Wait()
 
-	if cerr := kafkaProducer.Close(); cerr != nil {
-		log.Warn("close kafka producer", "error", cerr)
+	if cerr := producer.Close(); cerr != nil {
+		log.Warn("close rabbitmq producer", "error", cerr)
 	}
 
 	return nil
