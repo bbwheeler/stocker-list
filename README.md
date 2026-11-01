@@ -1,42 +1,70 @@
 # stocker-list
 
-A Go service that pulls stock symbols from public providers and publishes them as Kafka
-`Stock` protobuf messages on a refresh timer. It is a Kafka publisher driven by a
-background refresh loop
+A Go service that pulls stock symbols from public providers and publishes them as RabbitMQ
+`Stock` protobuf messages on a refresh timer. It is a RabbitMQ publisher driven by a
+background refresh loop.
 
 ## Architecture
 
 ```
 cmd/server         wires everything together and runs the refresh loop (not a server)
-internal/config    env-var configuration (core, Kafka, provider)
+internal/config    env-var configuration (core, RabbitMQ, provider)
 internal/provider  stock symbol provider clients (TSX, US)
 internal/refresher background loop retrieving symbols each interval
-internal/kafka     Kafka producer (no-op when Kafka is disabled)
+internal/rabbitmq  RabbitMQ producer (no-op when publishing is disabled)
 ```
 
-## Kafka integration
+## RabbitMQ integration
 
 The service publishes `Stock` messages using protobuf serialization from
 [stocker-store](https://git.wheeli.ca/brian/stocker-store).
 
-- **Message type:** `kafkastockv1.Stock{Symbol, Exchange}`
-- **Package:** `kafkastockv1`
-- **Import path:** `stocker-store/proto/v1/kafka`
+- **Message type:** `stockstorev1.Stock{Symbol, Exchange}`
+- **Package:** `stockstorev1`
+- **Import path:** `git.wheeli.ca/brian/stocker-store/proto/v1`
 
 ```go
-import kafkastockv1 "stocker-store/proto/v1/kafka"
+import stockstorev1 "git.wheeli.ca/brian/stocker-store/proto/v1"
 
-msg := &kafkastockv1.Stock{
+msg := &stockstorev1.Stock{
     Symbol:   "AAPL",
     Exchange: "NASDAQ",
 }
 ```
 
+- **Exchange/routing key:** the producer declares the durable exchange named by
+  `RABBITMQ_EXCHANGE` (default `stock.update`) of type `RABBITMQ_EXCHANGE_TYPE` (default
+  `topic`) and publishes every message with the routing key `RABBITMQ_ROUTING_KEY`
+  (default `stock.update.v1`). The stock symbol rides as the `MessageId` (plus
+  `symbol`/`exchange` headers); the exchange is the only thing the publisher declares —
+  consumers own their queues, bindings, and routing on their side.
+- **Persistent delivery:** every message is published with persistent delivery mode, so it
+  survives a broker restart when the consumer's queue is durable.
+- **Publisher confirms:** confirms are enabled and every publish waits for the broker's
+  confirmation. A failed or non-acked publish tears down the connection, reconnects, and
+  republishes once; a second failure is fatal to the refresh cycle. An unreachable broker on
+  the very first publish is not retried.
+- **Lazy connection:** `NewProducer` validates configuration but does not dial. The
+  connection, channel, exchange declaration, and confirms happen at the first publish.
 - Publishing is **disabled** (a graceful no-op; no broker is ever dialed) when
-  `KAFKA_BROKERS` is empty.
-- Otherwise, messages are sent to `KAFKA_TOPIC` (default `stock.update.v1`) with the stock
-  symbol as the message key, over a **plaintext** connection. Brokers must be reachable
-  plaintext: **SASL and TLS are not supported**.
+  `RABBITMQ_URL` is explicitly empty.
+
+### Topology
+
+The publisher declares only the exchange; it never declares queues or bindings. Consumers
+must declare their own durable queue and bind it to the exchange. For the default topic
+exchange, an exact binding is:
+
+```
+rabbitmqadmin declare queue name=stock-updates durable=true
+rabbitmqadmin declare binding source=stock.update destination=stock-updates routing_key=stock.update.v1
+```
+
+A consumer wanting future versions can bind `stock.update.#`; on a `direct` exchange the
+binding key must match exactly; on a `fanout` exchange the routing key is ignored; on a
+`headers` exchange the consumer binds on the `symbol`/`exchange` headers the publisher sets.
+Note that if no queue is bound, the exchange accepts and discards the message — publisher
+confirms acknowledge exchange receipt, not consumer delivery.
 
 ## Providers
 
@@ -48,7 +76,7 @@ active.
 
 The endpoint `https://www.tsx.com/json/company-directory/search/tsx/*` returns all
 TSX-listed companies. The service holds no symbol list of its own between cycles: each
-cycle the provider's full current TSX list is fetched fresh and re-published to Kafka, so
+cycle the provider's full current TSX list is fetched fresh and re-published to RabbitMQ, so
 what is published always reflects the provider's live listings.
 
 ### US (NASDAQ screener)
@@ -76,14 +104,14 @@ A provider failure does not stop the service:
 - The failure is logged at error level as `provider failed to list symbols`, with the provider
   type and the full error.
 - The cycle continues with the remaining providers, and the symbols they return are still
-  published to Kafka.
+  published to RabbitMQ.
 - The cycle then logs `refresh cycle completed with provider failures` with the number of
   symbols collected (`symbols`) and the number of failed providers (`failed_providers`).
 - The next refresh interval retries every provider, so a temporarily unavailable provider (for
   example, a TMX maintenance page) recovers automatically without a restart.
 
 Provider failures are never fatal: the refresher keeps running, and the only refresh failure it
-treats as an error is a Kafka publish failure. Provider base URLs are compile-time constants
+treats as an error is a publish failure. Provider base URLs are compile-time constants
 (`defaultBaseURL` in `internal/provider/tsx.go` and `nasdaqBaseURL` in `internal/provider/us.go`);
 they cannot be changed with an environment variable or config file.
 
@@ -96,19 +124,22 @@ for the incident analysis behind this behavior.
 
 | Name | Type | Default | Required? | Description |
 |------|------|---------|-----------|-------------|
-| `REFRESH_CHECK_INTERVAL` | Go duration string (e.g. `24h`, `12h`, `30m`) | `24h` | No | How often the background refresher pulls the symbol list and re-publishes to Kafka. Must parse and be `> 0`. |
+| `REFRESH_CHECK_INTERVAL` | Go duration string (e.g. `24h`, `12h`, `30m`) | `24h` | No | How often the background refresher pulls the symbol list and re-publishes to RabbitMQ. Must parse and be `> 0`. |
 
-### Kafka
+### RabbitMQ
 
 | Name | Type | Default | Required? | Description |
 |------|------|---------|-----------|-------------|
-| `KAFKA_BROKERS` | comma-separated `host:port` list (e.g. `kafka1:9093,kafka2:9093`) | empty | No | Kafka brokers to publish to (**plaintext only**). **Empty = Kafka disabled → the producer is a graceful no-op** (no broker is ever dialed). |
-| `KAFKA_TOPIC` | string | `stock.update.v1` | No | Topic published to. Empty/absent falls back to `stock.update.v1`. |
+| `RABBITMQ_URL` | AMQP URI string (`amqp://`/`amqps://`) | `amqp://guest:guest@192.168.1.48:5672/` | No | Broker URI. Credentials are embedded in the URI and are never logged. **Unset = default; explicitly empty (`RABBITMQ_URL=`) = publishing disabled (graceful no-op).** |
+| `RABBITMQ_EXCHANGE` | string | `stock.update` | No | Exchange the publisher declares and publishes to. Empty falls back to the default. |
+| `RABBITMQ_EXCHANGE_TYPE` | enum string | `topic` | No | One of `direct`, `topic`, `fanout`, `headers`. Trimmed and lowercased; any other value is a startup error. |
+| `RABBITMQ_ROUTING_KEY` | string | `stock.update.v1` | No | Routing key used for every message. Empty falls back to the default. |
 
 **Key semantics:**
 
-- `KAFKA_BROKERS` empty ⇒ Kafka disabled: the service still runs the refresh loop, but the
-  producer is a no-op (no broker is dialed, nothing is published).
+- `RABBITMQ_URL` unset ⇒ the default broker URL `amqp://guest:guest@192.168.1.48:5672/` is used.
+- `RABBITMQ_URL=` (explicitly empty) ⇒ publishing disabled: the service still runs the refresh
+  loop, but the producer is a no-op (no broker is dialed, nothing is published).
 - Both providers (TSX and US) are active by default; neither requires an API key.
 
 ## Running it
@@ -121,7 +152,8 @@ make run       # or: go run ./cmd/server
 ```
 
 Set the environment variables above in the process environment (see `.env.example`). With
-`KAFKA_BROKERS` empty publishing is a no-op; both providers (TSX and US) run unconditionally.
+`RABBITMQ_URL` explicitly empty publishing is a no-op; both providers (TSX and US) run
+unconditionally.
 
 ### Podman (podman-compose)
 
@@ -143,7 +175,8 @@ Deployment facts: **image** `git.wheeli.ca/brian/stocker-list:latest`, **service
    make quadlet-install
    ```
 
-2. Fill in the environment file (set `KAFKA_*` as needed):
+2. Fill in the environment file (set `RABBITMQ_*` as needed — at minimum the broker URL with
+   real credentials, since the default points at `192.168.1.48` with `guest:guest`):
 
    ```
    $EDITOR ~/.config/stocker-list/.env.podman
@@ -163,7 +196,9 @@ Deployment facts: **image** `git.wheeli.ca/brian/stocker-list:latest`, **service
    ```
 
    The `WantedBy=default.target` in the `.container` file ensures the service starts
-   automatically on boot.
+   automatically on boot. The unit only waits for `network-online.target`: the broker is
+   remote and the producer connects lazily at the first publish. If a local RabbitMQ
+   container is ever added, give the unit `After=`/`Wants=` on it.
 
 5. Check status and logs:
 

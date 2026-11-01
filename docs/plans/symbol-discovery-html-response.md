@@ -2,6 +2,8 @@
 
 **Goal:** Stop a single stock-symbol provider from terminating the whole service when it returns an HTML page instead of JSON, and make such failures diagnosable with the HTTP status, Content-Type, URL, and a short body preview.
 
+> Updated after the RabbitMQ migration; the incident analysis and provider behavior are unchanged.
+
 **Architecture:** The two providers (TSX and US) currently decode response bodies directly with `encoding/json`, so an HTML error page surfaces as `invalid character '<'`. This plan adds one shared HTTP/JSON helper that validates status and Content-Type before decoding, sets explicit `User-Agent` and `Accept` headers, limits redirects, and includes a body preview in errors. The refresher is changed to log a provider failure, continue with the healthy providers, and keep the refresh loop running instead of exiting.
 
 **Tech Stack:** Go 1.25, standard library `net/http`, `net/http/httptest`, `encoding/json`, `mime`, `log/slog`.
@@ -13,7 +15,7 @@
 - Do not change the TSX or NASDAQ endpoint constants as part of this fix. The TSX failure is an upstream outage, not a stale URL (evidence below).
 - No new third-party dependencies. Use the Go standard library only.
 - Preserve the existing `provider.Provider` interface and both provider public APIs.
-- Keep `KAFKA_BROKERS` empty as a valid no-op configuration; do not introduce Kafka coupling into provider tests.
+- Keep an explicitly empty `RABBITMQ_URL` as a valid no-op configuration; do not introduce broker coupling into provider tests.
 - Every step must leave the module buildable and `go test ./...` green.
 - Follow the repository's existing style: small files, table-driven tests where useful, no logging inside provider clients.
 
@@ -139,7 +141,7 @@ The first page contained 250 rows and decoded to the existing `nasdaqResponse` s
 - TSX URL: compile-time constant `defaultBaseURL` in `internal/provider/tsx.go:15`.
 - US URL: compile-time constant `nasdaqBaseURL` in `internal/provider/us.go:19`.
 - No environment variable, config file, deploy template, or systemd unit sets either URL. `.env.example`, `.env.podman`, `podman-compose.yml`, `deploy/quadlet/stocker-list.container`, and `Makefile` contain no provider URL or API key.
-- `internal/config/config.go` only exposes `REFRESH_CHECK_INTERVAL`, `KAFKA_BROKERS`, and `KAFKA_TOPIC`. There is no stale provider configuration to change.
+- `internal/config/config.go` only exposes `REFRESH_CHECK_INTERVAL` and the `RABBITMQ_*` variables. There is no stale provider configuration to change.
 
 ### What is not the cause
 
@@ -160,9 +162,9 @@ The first page contained 250 rows and decoded to the existing `nasdaqResponse` s
 
 | Document | Contents | Is it a symbol-discovery plan? |
 |---|---|---|
-| `design.md` | Nine-line project description: pulls stock data and publishes to Kafka; protobuf message shape. | No |
-| `README.md` | Architecture, Kafka integration, provider descriptions, environment variables, local/Podman/Quadlet run instructions. | No |
-| `docs/kafka-go-producer-rewrite.md` | Complete, detailed implementation plan for the historical sarama → segmentio/kafka-go rewrite. It is already implemented at HEAD (`go.mod` uses kafka-go; config has only `KAFKA_BROKERS`/`KAFKA_TOPIC`). | No |
+| `design.md` | Short project description: pulls stock data and publishes to RabbitMQ; protobuf message shape. | No |
+| `README.md` | Architecture, RabbitMQ integration, provider descriptions, environment variables, local/Podman/Quadlet run instructions. | No |
+| An obsolete historical producer rewrite plan | Removed after the RabbitMQ migration. | No |
 | `docs/plans/` | Did not exist before this document. | No |
 
 There is no existing plan for symbol discovery or provider error handling. This document is the first one.
@@ -183,7 +185,7 @@ There is no existing plan for symbol discovery or provider error handling. This 
 | `internal/refresher/refresher.go` | `tick` (lines 57–67) | Calls `discoverAllSymbols`; any error is returned as `symbol discovery failed`, which makes `Run` return and the service exit. |
 | `internal/refresher/refresher.go` | `discoverAllSymbols` (lines 71–95) | Iterates providers and returns on the first `ListSymbols` error. TSX failing prevents US from running and prevents publishing any symbols. |
 | `cmd/server/main.go` | `run` (lines 28–73) | Starts `ref.Run` in a goroutine. On `Run` error it logs `failed to run` and cancels the context. It does not need a change for this fix; the refresher will stop returning provider errors. |
-| `internal/config/config.go` | `Config`, `Load` | Only refresh interval and Kafka settings. No provider URL/key fields. No change required. |
+| `internal/config/config.go` | `Config`, `Load` | Only the refresh interval and RabbitMQ settings. No provider URL/key fields. No change required. |
 | `.env.example`, `.env.podman`, `podman-compose.yml`, `deploy/quadlet/stocker-list.container`, `Makefile` | — | No provider URL or key values. No stale configuration to fix. |
 | `README.md` | Providers section (lines ~43–61) | Documents the TSX endpoint and says it is always active. Needs a short note about graceful degradation and response validation. |
 
@@ -216,7 +218,7 @@ An empty Content-Type is allowed through to `json.Unmarshal`; if the body is HTM
 - Log each provider error at error level with the provider type and the full error.
 - Continue to the next provider.
 - Publish the symbols returned by the healthy providers.
-- Return the companies, the number of failed providers, and a fatal error only for Kafka publish failures.
+- Return the companies, the number of failed providers, and a fatal error only for publish failures.
 
 `tick` logs a warning when `failed > 0` and returns `nil`, so `Run` keeps the loop alive and retries on the next interval. If every provider fails, the service stays up, logs the failure, publishes nothing, and retries instead of entering a systemd restart loop.
 
@@ -224,7 +226,7 @@ An empty Content-Type is allowed through to `json.Unmarshal`; if the body is HTM
 
 - The TSX and NASDAQ URLs.
 - The `provider.Provider` interface.
-- The Kafka producer API and no-op behavior.
+- The RabbitMQ producer API and no-op behavior.
 - Environment variables and deploy templates. No provider URL or key is configurable today, and none is added.
 - The 24-hour default refresh interval.
 
@@ -259,7 +261,7 @@ Existing happy-path, empty-response, pagination, deduplication, HTTP-error, inva
 2. `go vet ./...` — expect no output.
 3. `go test ./... -count=1` — all packages pass.
 4. `go build ./...` — succeeds.
-5. Run `go run ./cmd/server` with `KAFKA_BROKERS` empty and the default refresh interval. Expected observations:
+5. Run `go run ./cmd/server` with `RABBITMQ_URL=` empty and the default refresh interval. Expected observations:
    - The process stays running instead of exiting.
    - Logs contain `provider failed to list symbols` for `*provider.Client` with an error such as:
      `fetch TSX symbols: unexpected Content-Type "text/html" from https://www.tsx.com/json/company-directory/search/tsx/* (HTTP 200): <!DOCTYPE html> ...`
@@ -798,7 +800,7 @@ func TestRun_ProviderFailureDoesNotStopLoop(t *testing.T) {
 		errorProvider{err: errors.New(`unexpected Content-Type "text/html"`)},
 		healthy,
 	}
-	ref := refresher.New(testConfig(), nil, providers, log, &kafka.Producer{})
+	ref := refresher.New(testConfig(), nil, providers, log, &rabbitmq.Producer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -858,7 +860,7 @@ func (r *Refresher) tick(ctx context.Context) error {
 
 ```go
 // discoverAllSymbols pulls the current symbol list from all providers and
-// publishes a StockUpdate message to Kafka for every symbol discovered.
+// publishes a Stock message to RabbitMQ for every symbol discovered.
 // A failure from one provider is logged and does not prevent the remaining
 // providers from being used; the cycle still succeeds.
 func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company, int, error) {
@@ -878,7 +880,7 @@ func (r *Refresher) discoverAllSymbols(ctx context.Context) ([]provider.Company,
 
 	if r.producer != nil {
 		for _, c := range allCompanies {
-			msg := &kafkastockv1.Stock{
+			msg := &stockstorev1.Stock{
 				Symbol:   c.Symbol,
 				Exchange: c.Exchange,
 			}
@@ -902,7 +904,7 @@ go test ./... -count=1
 
 **Verify:** The refresher tests pass; `TestRun_ProviderFailureDoesNotStopLoop` proves `Run` stays alive and the failure is logged.
 
-**Done when:** A single provider failure no longer aborts the cycle or exits the process; the healthy provider's symbols are still published; Kafka publish failures still return an error.
+**Done when:** A single provider failure no longer aborts the cycle or exits the process; the healthy provider's symbols are still published; publish failures still return an error.
 
 ---
 
@@ -952,10 +954,10 @@ go build ./...
 
 Expected: `gofmt -l .` prints nothing; `go vet` and `go test` are clean; the build succeeds.
 
-2. Run the binary with Kafka disabled and observe the startup behavior:
+2. Run the binary with publishing disabled and observe the startup behavior:
 
 ```
-KAFKA_BROKERS= go run ./cmd/server
+RABBITMQ_URL= go run ./cmd/server
 ```
 
 Expected:
@@ -1002,4 +1004,4 @@ git push
 - Changing the default 24-hour refresh interval or adding per-provider retry/backoff.
 - Adding provider URL or enable/disable environment variables.
 - Fixing the pre-existing `main.run` exit-code behavior on fatal errors or the `context canceled` log message on normal shutdown.
-- Changing Kafka producer behavior or the `provider.Provider` interface.
+- Changing RabbitMQ producer behavior or the `provider.Provider` interface.

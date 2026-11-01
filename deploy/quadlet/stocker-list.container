@@ -1,6 +1,8 @@
 [Unit]
+# Only network ordering: the broker is remote and the producer connects lazily
+# at the first publish. If a local RabbitMQ container is ever added, order
+# against it here (After=/Wants= on that unit).
 After=network-online.target
-After=kafka-broker-1.container
 
 [Container]
 Image=git.wheeli.ca/brian/stocker-list:latest
