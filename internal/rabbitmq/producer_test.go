@@ -249,6 +249,79 @@ func TestNewProducerInvalidURL(t *testing.T) {
 	}
 }
 
+// TestNewProducerURLParseErrorRedactsCredentials verifies that a URI parse
+// failure never echoes the configured URL back: ParseURI wraps net/url errors
+// that embed the full URI, including the password.
+func TestNewProducerURLParseErrorRedactsCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "invalid port",
+			url:  "amqp://user:secretpass@localhost:notaport/",
+			want: "parse RABBITMQ_URL",
+		},
+		{
+			name: "invalid percent escape",
+			url:  "amqp://user:secretpass@localhost/%zz",
+			want: "parse RABBITMQ_URL",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewProducer(&config.Config{RabbitMQURL: tt.url}, discardLogger())
+			if err == nil {
+				t.Fatal("NewProducer = nil error, want URL parse error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "secretpass") {
+				t.Errorf("error %q leaks the password from RABBITMQ_URL", err)
+			}
+			if strings.Contains(err.Error(), tt.url) {
+				t.Errorf("error %q echoes the full RABBITMQ_URL", err)
+			}
+		})
+	}
+}
+
+func TestNewProducerNilConfig(t *testing.T) {
+	d := &fakeDialer{}
+	p, err := NewProducer(nil, discardLogger())
+	if err != nil {
+		t.Fatalf("NewProducer(nil) = %v, want nil", err)
+	}
+	p.dial = d.dial
+
+	if p.exchange != defaultExchange || p.exchangeType != defaultExchangeType || p.routingKey != defaultRoutingKey {
+		t.Errorf("defaults = %q/%q/%q, want %q/%q/%q",
+			p.exchange, p.exchangeType, p.routingKey,
+			defaultExchange, defaultExchangeType, defaultRoutingKey)
+	}
+	if err := p.PublishStockUpdate(context.Background(), testMessage()); err != nil {
+		t.Errorf("PublishStockUpdate = %v, want nil", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("Close = %v, want nil", err)
+	}
+	if d.calls != 0 {
+		t.Errorf("dial called %d times, want 0", d.calls)
+	}
+}
+
+func TestNilReceiverIsNoOp(t *testing.T) {
+	var p *Producer
+	if err := p.PublishStockUpdate(context.Background(), testMessage()); err != nil {
+		t.Errorf("PublishStockUpdate on nil producer = %v, want nil", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("Close on nil producer = %v, want nil", err)
+	}
+}
+
 func TestNewProducerInvalidExchangeType(t *testing.T) {
 	tests := []struct {
 		name string

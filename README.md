@@ -140,6 +140,10 @@ for the incident analysis behind this behavior.
 - `RABBITMQ_URL` unset ⇒ the default broker URL `amqp://guest:guest@192.168.1.48:5672/` is used.
 - `RABBITMQ_URL=` (explicitly empty) ⇒ publishing disabled: the service still runs the refresh
   loop, but the producer is a no-op (no broker is dialed, nothing is published).
+- The default URL uses the stock `guest:guest` account. Stock RabbitMQ only accepts `guest`
+  from the broker's own loopback interface, so connecting to `192.168.1.48` with `guest` will
+  be refused unless the broker owner has relaxed that restriction; supply a dedicated user
+  (and vhost, if any) via `RABBITMQ_URL` for any non-local broker.
 - Both providers (TSX and US) are active by default; neither requires an API key.
 
 ## Running it

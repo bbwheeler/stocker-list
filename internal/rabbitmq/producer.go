@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -115,10 +116,21 @@ func NewProducer(cfg *config.Config, log *slog.Logger) (*Producer, error) {
 	}
 
 	if _, err := amqp.ParseURI(p.url); err != nil {
-		return nil, fmt.Errorf("parse RABBITMQ_URL: %w", err)
+		return nil, fmt.Errorf("parse RABBITMQ_URL: %w", redactURLError(err))
 	}
 
 	return p, nil
+}
+
+// redactURLError strips the AMQP URI from a ParseURI error. ParseURI failures
+// on the URI itself are wrapped in *url.Error, whose message embeds the full
+// URI including credentials; only the inner reason is safe to log.
+func redactURLError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
 }
 
 // PublishStockUpdate marshals msg and publishes it to the configured exchange,
