@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	git.wheeli.ca/brian/stocker-store v0.0.0-20260924185324-fc63d46307a2
+	github.com/rabbitmq/amqp091-go v1.16.0
 	github.com/segmentio/kafka-go v0.4.51
 	google.golang.org/protobuf v1.36.12
 )
