@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stocker-list
+  namespace: stocker
+  labels:
+    app.kubernetes.io/name: stocker-list
+    app.kubernetes.io/part-of: stocker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stocker-list
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stocker-list
+        app.kubernetes.io/part-of: stocker
+    spec:
+      imagePullSecrets:
+        - name: wheeli-registry
+      containers:
+        - name: stocker-list
+          image: git.wheeli.ca/brian/stocker-list:latest
+          imagePullPolicy: Always
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          envFrom:
+            - configMapRef:
+                name: stocker-list-config
+            - secretRef:
+                name: stocker-list-env
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # Deliberately NO liveness/readiness probe: stocker-list has no
+          # HTTP endpoint and no healthcheck subcommand (see design doc).
