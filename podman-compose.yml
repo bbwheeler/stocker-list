@@ -1,59 +1,10 @@
+# Local development only. In Kubernetes, stocker-list runs as a CronJob (see
+# deploy/kubernetes/). One container invocation performs one full cycle and
+# exits; restart is disabled because scheduling is external.
 services:
   stocker-list:
     build:
       context: .
       dockerfile: Containerfile
     env_file: .env.podman
-    ports:
-      - "50051:50051"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  tsx-evaluator:
-    image: localhost/tsx-evaluator:latest
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_NAME: ${DB_NAME:-tsx_evaluator}
-      DB_SSLMODE: disable
-      TRACKER_ADDR: tsx-tracker:50051
-      EVAL_INTERVAL: 8h
-      EVAL_BATCH_SIZE: 1
-      LLM_BASE_URL: http://host.docker.internal:11434
-      LLM_MODEL: llama3
-      LLM_TIMEOUT: 60s
-    ports:
-      - "50052:50052"
-    depends_on:
-      tsx-tracker:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-
-  tsx-history:
-    build: .
-    env_file: .env.podman
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_NAME: ${DB_NAME:-tsx_history}
-      DB_SSLMODE: disable
-      TRACKER_ADDR: tsx-tracker:50051
-      EVALUATOR_ADDR: tsx-evaluator:50052
-      SYNC_INTERVAL: 1h
-    ports:
-      - "50053:50053"
-    depends_on:
-      tsx-tracker:
-        condition: unhealthy
-      tsx-evaluator:
-        condition: service_healthy
-
-volumes:
-  pgdata:
+    restart: "no"
