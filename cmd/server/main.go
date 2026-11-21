@@ -1,4 +1,7 @@
-// Command stocker-list manages lifecycle for pulling stock data and publishing to RabbitMQ.
+// Command stocker-list runs exactly one refresh cycle: it fetches the full
+// stock symbol universe from every provider, publishes each symbol to
+// RabbitMQ, and exits. Kubernetes CronJob scheduling replaces the old
+// in-process refresher loop.
 package main
 
 import (
@@ -7,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/anomalyco/stocker-list/internal/config"
@@ -31,6 +33,8 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// SIGTERM (Pod termination / activeDeadlineSeconds) cancels in-flight
+	// provider requests and publishes so the process exits promptly.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -43,31 +47,17 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create rabbitmq producer: %w", err)
 	}
-
-	// Background loop that keeps the symbol list fresh. Runs an immediate
-	// sync on startup, then on cfg.RefreshCheckInterval.
-	var wg sync.WaitGroup
-	ref := refresher.New(cfg, nil, providers, log, producer)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := ref.Run(ctx)
-		if err != nil {
-			log.ErrorContext(ctx, "failed to run", "error", err)
-			cancelledContext, cancel := context.WithCancelCause(ctx)
-			ctx = cancelledContext
-			cancel(err)
+	defer func() {
+		if cerr := producer.Close(); cerr != nil {
+			log.Warn("close rabbitmq producer", "error", cerr)
 		}
 	}()
 
-	<-ctx.Done()
-	log.Info("shutting down")
-
-	wg.Wait()
-
-	if cerr := producer.Close(); cerr != nil {
-		log.Warn("close rabbitmq producer", "error", cerr)
+	ref := refresher.New(providers, log, producer)
+	if err := ref.RunOnce(ctx); err != nil {
+		return fmt.Errorf("run refresh cycle: %w", err)
 	}
 
+	log.Info("one-shot run complete; exiting")
 	return nil
 }

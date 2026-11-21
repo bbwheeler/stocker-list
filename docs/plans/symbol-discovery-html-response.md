@@ -1,5 +1,9 @@
 # Symbol Discovery HTML Response Handling Implementation Plan
 
+> **Historical:** This plan predates the CronJob redesign. `refresher.Run`,
+> `refresher.tick`, and `REFRESH_CHECK_INTERVAL` no longer exist; see
+> `docs/design-kubernetes-deployment.md` for the current design.
+
 **Goal:** Stop a single stock-symbol provider from terminating the whole service when it returns an HTML page instead of JSON, and make such failures diagnosable with the HTTP status, Content-Type, URL, and a short body preview.
 
 > Updated after the RabbitMQ migration; the incident analysis and provider behavior are unchanged.

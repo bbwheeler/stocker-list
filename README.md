@@ -1,16 +1,16 @@
 # stocker-list
 
 A Go service that pulls stock symbols from public providers and publishes them as RabbitMQ
-`Stock` protobuf messages on a refresh timer. It is a RabbitMQ publisher driven by a
-background refresh loop.
+`stockstorev1.Stock` protobuf messages. It performs exactly one full refresh cycle per
+invocation and exits; scheduling is external (a Kubernetes CronJob).
 
 ## Architecture
 
 ```
-cmd/server         wires everything together and runs the refresh loop (not a server)
-internal/config    env-var configuration (core, RabbitMQ, provider)
+cmd/server         wires everything together and runs exactly one cycle
+internal/config    env-var configuration (RabbitMQ only)
 internal/provider  stock symbol provider clients (TSX, US)
-internal/refresher background loop retrieving symbols each interval
+internal/refresher one-shot cycle: fetch all symbols, publish, return
 internal/rabbitmq  RabbitMQ producer (no-op when publishing is disabled)
 ```
 
@@ -42,7 +42,7 @@ msg := &stockstorev1.Stock{
   survives a broker restart when the consumer's queue is durable.
 - **Publisher confirms:** confirms are enabled and every publish waits for the broker's
   confirmation. A failed or non-acked publish tears down the connection, reconnects, and
-  republishes once; a second failure is fatal to the refresh cycle. An unreachable broker on
+  republishes once; a second failure is fatal to the run. An unreachable broker on
   the very first publish is not retried.
 - **Lazy connection:** `NewProducer` validates configuration but does not dial. The
   connection, channel, exchange declaration, and confirms happen at the first publish.
@@ -82,12 +82,13 @@ what is published always reflects the provider's live listings.
 ### US (NASDAQ screener)
 
 The US provider uses the **public NASDAQ screener API** — `api.nasdaq.com/api/screener/stocks`
-(the endpoint that powers the nasdaq.com web app). It returns the full set of US common
-stocks (NYSE, NASDAQ, NYSE American) as a single JSON payload and **requires no API key**.
-The US provider is always active, alongside TSX.
+(the endpoint that powers the nasdaq.com web app). It returns US common stocks (NYSE,
+NASDAQ, NYSE American) as paginated JSON and **requires no API key**. The US provider is
+always active, alongside TSX.
 
-Note: the API does not expose a per-row exchange or currency field, so the provider maps
-every US symbol to `Exchange: "US"` and `Currency: "USD"` (safe for this all-US, USD universe).
+Note: the API does not expose a per-row exchange or currency field, so the provider runs the
+screener once per listing exchange and tags each symbol with that exchange (`NASDAQ`, `NYSE`,
+or `AMEX`); `Currency` is `"USD"` for this all-US universe.
 
 ### Response validation and graceful degradation
 
@@ -99,7 +100,7 @@ of up to 512 bytes (whitespace-collapsed), so the real cause is visible in the l
 send a browser `User-Agent` and `Accept: application/json`, read at most 20 MiB per response,
 and fail with `stopped after 5 redirects` when a redirect chain reaches the limit.
 
-A provider failure does not stop the service:
+A provider failure does not abort the run:
 
 - The failure is logged at error level as `provider failed to list symbols`, with the provider
   type and the full error.
@@ -107,11 +108,12 @@ A provider failure does not stop the service:
   published to RabbitMQ.
 - The cycle then logs `refresh cycle completed with provider failures` with the number of
   symbols collected (`symbols`) and the number of failed providers (`failed_providers`).
-- The next refresh interval retries every provider, so a temporarily unavailable provider (for
+- The next scheduled run retries every provider, so a temporarily unavailable provider (for
   example, a TMX maintenance page) recovers automatically without a restart.
 
-Provider failures are never fatal: the refresher keeps running, and the only refresh failure it
-treats as an error is a publish failure. Provider base URLs are compile-time constants
+Provider failures are never fatal: the run still completes and publishes the healthy providers'
+symbols. The process exits `0` after publishing the healthy provider's symbols. The only run
+failure it treats as an error is a publish failure. Provider base URLs are compile-time constants
 (`defaultBaseURL` in `internal/provider/tsx.go` and `nasdaqBaseURL` in `internal/provider/us.go`);
 they cannot be changed with an environment variable or config file.
 
@@ -120,11 +122,12 @@ for the incident analysis behind this behavior.
 
 ## Environment variables
 
-### Core
+### Cadence
 
-| Name | Type | Default | Required? | Description |
-|------|------|---------|-----------|-------------|
-| `REFRESH_CHECK_INTERVAL` | Go duration string (e.g. `24h`, `12h`, `30m`) | `24h` | No | How often the background refresher pulls the symbol list and re-publishes to RabbitMQ. Must parse and be `> 0`. |
+There is no refresh-interval environment variable. `stocker-list` performs
+one cycle per invocation. In Kubernetes, the CronJob `schedule` in
+`deploy/kubernetes/stocker-list.yaml` controls cadence; change that field
+and re-apply the manifest.
 
 ### RabbitMQ
 
@@ -138,8 +141,8 @@ for the incident analysis behind this behavior.
 **Key semantics:**
 
 - `RABBITMQ_URL` unset ⇒ the default broker URL `amqp://guest:guest@192.168.1.48:5672/` is used.
-- `RABBITMQ_URL=` (explicitly empty) ⇒ publishing disabled: the service still runs the refresh
-  loop, but the producer is a no-op (no broker is dialed, nothing is published).
+- `RABBITMQ_URL=` (explicitly empty) ⇒ publishing disabled: the process still performs one
+  cycle, but the producer is a no-op (no broker is dialed, nothing is published).
 - The default URL uses the stock `guest:guest` account. Stock RabbitMQ only accepts `guest`
   from the broker's own loopback interface, so connecting to `192.168.1.48` with `guest` will
   be refused unless the broker owner has relaxed that restriction; supply a dedicated user
@@ -152,71 +155,30 @@ for the incident analysis behind this behavior.
 
 ```
 make build     # produces bin/stocker-list
-make run       # or: go run ./cmd/server
+make run       # performs one cycle and exits; or: go run ./cmd/server
 ```
 
 Set the environment variables above in the process environment (see `.env.example`). With
 `RABBITMQ_URL` explicitly empty publishing is a no-op; both providers (TSX and US) run
-unconditionally.
+unconditionally. The US provider paginates through all three listing exchanges and tags each
+symbol with its exchange (`NASDAQ`, `NYSE`, or `AMEX`), matching
+`internal/provider/us.go`.
 
 ### Podman (podman-compose)
 
 ```
-make podman-up
-make podman-down
+make podman-up   # starts one local container; it runs one cycle and exits
+make podman-down # removes the stopped container
 ```
 
-### Quadlet (rootless, systemd user service)
+The container uses `.env.podman` for its environment (copy values from `.env.example` if needed).
+It runs exactly one full cycle and then exits (`restart: "no"`); scheduling is external.
 
-Deployment facts: **image** `git.wheeli.ca/brian/stocker-list:latest`, **service name**
-`stocker-list`, **env file** `~/.config/stocker-list/.env.podman`.
 
-1. Clone the repo and install the quadlet unit (copies the unit file to
-   `~/.config/containers/systemd/` and the env template to
-   `~/.config/stocker-list/.env.podman`):
+### Kubernetes
 
-   ```
-   make quadlet-install
-   ```
-
-2. Fill in the environment file (set `RABBITMQ_*` as needed — at minimum the broker URL with
-   real credentials, since the default points at `192.168.1.48` with `guest:guest`):
-
-   ```
-   $EDITOR ~/.config/stocker-list/.env.podman
-   ```
-
-3. Build and push the image:
-
-   ```
-   (cd deploy && ./push.sh)    # builds + pushes git.wheeli.ca/brian/stocker-list:latest
-   ```
-
-4. Start the service:
-
-   ```
-   systemctl --user daemon-reload
-   systemctl --user start stocker-list.service
-   ```
-
-   The `WantedBy=default.target` in the `.container` file ensures the service starts
-   automatically on boot. The unit only waits for `network-online.target`: the broker is
-   remote and the producer connects lazily at the first publish. If a local RabbitMQ
-   container is ever added, give the unit `After=`/`Wants=` on it.
-
-5. Check status and logs:
-
-   ```
-   systemctl --user status stocker-list
-   podman logs stocker-list
-   ```
-
-Stopping:
-
-```
-systemctl --user stop stocker-list
-```
-
-Updating: build and push a new image (step 3) and restart the service
-(`systemctl --user restart stocker-list`); the unit has `AutoUpdate=registry` and will pick
-up the new image.
+Deployment manifests live in `deploy/kubernetes/`. `stocker-list.yaml`
+contains the Namespace, ConfigMap, and CronJob; `secret.yaml` is a template
+for the RabbitMQ credentials. See
+`docs/design-kubernetes-deployment.md` and
+`docs/plan-kubernetes-deployment.md`.

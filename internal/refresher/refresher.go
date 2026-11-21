@@ -1,17 +1,15 @@
-// Package refresher runs a background loop that keeps the tracked stock
-// symbol list up to date. Each cycle it pulls the latest symbols from the
-// configured providers and publishes a StockUpdate message to RabbitMQ for
-// every tracked symbol.
+// Package refresher runs exactly one refresh cycle: it pulls the latest
+// symbols from the configured providers and publishes a StockUpdate message to
+// RabbitMQ for every tracked symbol. Scheduling is external (the Kubernetes
+// CronJob).
 package refresher
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	stockstorev1 "git.wheeli.ca/brian/stocker-store/proto/v1"
-	"github.com/anomalyco/stocker-list/internal/config"
 	"github.com/anomalyco/stocker-list/internal/provider"
 )
 
@@ -23,51 +21,35 @@ type Producer interface {
 }
 
 type Refresher struct {
-	cfg *config.Config
-	// repo is the (optional) persistence sink. It is nil in publish-only mode,
-	// where discovered symbols are published upstream instead of persisted
-	// locally.
-	repo      any
 	providers []provider.Provider
 	log       *slog.Logger
 	producer  Producer
 }
 
-func New(cfg *config.Config, repo any, providers []provider.Provider, log *slog.Logger, producer Producer) *Refresher {
-	return &Refresher{cfg: cfg, repo: repo, providers: providers, log: log, producer: producer}
+func New(providers []provider.Provider, log *slog.Logger, producer Producer) *Refresher {
+	return &Refresher{providers: providers, log: log, producer: producer}
 }
 
-// Run blocks, performing an immediate sync and then repeating every
-// cfg.RefreshCheckInterval, until ctx is cancelled or an error occurs.
-func (r *Refresher) Run(ctx context.Context) error {
-	err := r.tick(ctx)
-	if err != nil {
+// RunOnce performs exactly one full refresh cycle and returns when it
+// completes. Provider failures are logged and tolerated; a publish failure is
+// returned. A cancelled context is also returned as an error so an interrupted
+// run does not report success.
+func (r *Refresher) RunOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	ticker := time.NewTicker(r.cfg.RefreshCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			err = r.tick(ctx)
-			if err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (r *Refresher) tick(ctx context.Context) error {
 	r.log.Info("refresh cycle starting")
 
 	companies, failed, err := r.discoverAllSymbols(ctx)
 	if err != nil {
-		return fmt.Errorf("symbol discovery failed: %w", err)
+		return fmt.Errorf("refresh cycle failed: %w", err)
 	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if failed > 0 {
 		r.log.Warn("refresh cycle completed with provider failures",
 			"symbols", len(companies), "failed_providers", failed)

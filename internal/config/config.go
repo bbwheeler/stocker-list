@@ -1,20 +1,15 @@
 // Package config centralizes all runtime configuration, loaded from
-// environment variables so the service (database, refresh cadence, etc.)
-// is fully configurable without code changes.
+// environment variables so the RabbitMQ target is fully configurable without
+// code changes.
 package config
 
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 )
 
 type Config struct {
-	// Refresh behaviour
-	RefreshCheckInterval time.Duration
-
 	// RabbitMQ
 	RabbitMQURL          string
 	RabbitMQExchange     string
@@ -24,16 +19,10 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		RefreshCheckInterval: getEnvDuration("REFRESH_CHECK_INTERVAL", 24*time.Hour),
-
 		RabbitMQURL:          getEnvPreserveEmpty("RABBITMQ_URL", "amqp://guest:guest@192.168.1.48:5672/"),
 		RabbitMQExchange:     getEnv("RABBITMQ_EXCHANGE", "stock.update"),
 		RabbitMQExchangeType: getEnv("RABBITMQ_EXCHANGE_TYPE", "topic"),
 		RabbitMQRoutingKey:   getEnv("RABBITMQ_ROUTING_KEY", "stock.update.v1"),
-	}
-
-	if cfg.RefreshCheckInterval <= 0 {
-		return nil, fmt.Errorf("REFRESH_CHECK_INTERVAL must be > 0, got %s", cfg.RefreshCheckInterval)
 	}
 
 	exchangeType := strings.ToLower(strings.TrimSpace(cfg.RabbitMQExchangeType))
@@ -60,24 +49,6 @@ func getEnv(key, fallback string) string {
 func getEnvPreserveEmpty(key, fallback string) string {
 	if v, ok := os.LookupEnv(key); ok {
 		return v
-	}
-	return fallback
-}
-
-func getEnvInt(key string, fallback int) int {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return fallback
-}
-
-func getEnvDuration(key string, fallback time.Duration) time.Duration {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
 	}
 	return fallback
 }

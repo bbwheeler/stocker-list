@@ -4,44 +4,16 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestLoad_Defaults(t *testing.T) {
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.RefreshCheckInterval != 24*time.Hour {
-		t.Errorf("RefreshCheckInterval = %s, want %s", cfg.RefreshCheckInterval, 24*time.Hour)
-	}
-}
-
-func TestLoad_CustomValues(t *testing.T) {
-	env := map[string]string{
-		"REFRESH_CHECK_INTERVAL": "12h",
-	}
-	for k, v := range env {
-		t.Setenv(k, v)
-	}
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.RefreshCheckInterval != 12*time.Hour {
-		t.Errorf("RefreshCheckInterval = %s, want %s", cfg.RefreshCheckInterval, 12*time.Hour)
-	}
-}
-
-func TestLoad_InvalidDuration(t *testing.T) {
-	t.Setenv("REFRESH_CHECK_INTERVAL", "not-a-duration")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.RefreshCheckInterval != 24*time.Hour {
-		t.Errorf("RefreshCheckInterval = %s, want 24h (fallback)", cfg.RefreshCheckInterval)
+// TestLoad_IgnoresRefreshCheckInterval proves the removed variable has no
+// effect: cadence is owned by the Kubernetes CronJob schedule. Before the
+// removal, 0s failed the RefreshCheckInterval > 0 validation.
+func TestLoad_IgnoresRefreshCheckInterval(t *testing.T) {
+	unsetEnv(t, rabbitMQEnvKeys...)
+	t.Setenv("REFRESH_CHECK_INTERVAL", "0s")
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load() error: %v; REFRESH_CHECK_INTERVAL is no longer read", err)
 	}
 }
 
