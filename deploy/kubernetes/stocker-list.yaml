@@ -11,9 +11,9 @@ metadata:
   labels:
     app: stocker-list
 data:
-  RABBITMQ_EXCHANGE: stock.update
+  RABBITMQ_EXCHANGE: stocker
   RABBITMQ_EXCHANGE_TYPE: topic
-  RABBITMQ_ROUTING_KEY: stock.update.v1
+  RABBITMQ_ROUTING_KEY: stock.update.v1.list
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -32,7 +32,7 @@ spec:
       labels:
         app: stocker-list
     spec:
-      activeDeadlineSeconds: 600
+      activeDeadlineSeconds: 1800
       backoffLimit: 1
       template:
         metadata:
@@ -40,8 +40,6 @@ spec:
             app: stocker-list
         spec:
           restartPolicy: Never
-          imagePullSecrets:
-            - name: wheeli-registry
           containers:
             - name: stocker-list
               image: git.wheeli.ca/brian/stocker-list:latest
@@ -56,7 +54,7 @@ spec:
                   cpu: 50m
                   memory: 128Mi
                 limits:
-                  memory: 512Mi
+                  memory: 1024Mi
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
