@@ -167,8 +167,8 @@ symbol with its exchange (`NASDAQ`, `NYSE`, or `AMEX`), matching
 ### Podman (podman-compose)
 
 ```
-make podman-up   # starts one local container that runs one cycle and stops
-make podman-down # stops the container
+make podman-up   # starts one local container; it runs one cycle and exits
+make podman-down # removes the stopped container
 ```
 
 The container uses `.env.podman` for its environment (copy values from `.env.example` if needed).

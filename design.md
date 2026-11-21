@@ -12,7 +12,7 @@ Messages are published via AMQP to the durable exchange `stock.update` (configur
 `stock.update.v1` (configurable with `RABBITMQ_ROUTING_KEY`). The publisher declares only the
 exchange; consumers own their queues and bindings.
 
-The message should be defined using protobuf: `stockstorev1.Stock` contains the stock symbol, the exchange, and the timestamp. Optionally it can contain the company name, and any other appropriate fields.
+Messages use the `stockstorev1.Stock` protobuf from `stocker-store`. The publisher sets `Symbol` and `Exchange` (leaving `Scores` empty); the publish time travels in the AMQP `Timestamp` property, and `symbol`/`exchange` are also copied into message headers.
 
 Delivery is persistent (survives a broker restart when the consumer's queue is durable), and
 publisher confirms are enabled: every publish waits for the broker's confirmation, and a failed

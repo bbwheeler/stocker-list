@@ -14,6 +14,12 @@ Tasks 1–4 are the one-shot code refactor; Task 5 updates prose and env
 templates; Tasks 6–7 replace the superseded manifest work; Tasks 8–10 are
 removals and cleanups; Tasks 11–14 are verification and rollout.
 
+**Implementation status (2026-11-21):** Tasks 1–12 are implemented on
+`fix/k8s-docs-consistency` and pass `gofmt -l cmd internal`, `go build ./...`,
+`go vet ./...`, and `go test ./... -count=1`. Tasks 13–14 require a live
+cluster and were not executed from the development environment; they remain
+the operator runbook below.
+
 ## Global constraints
 
 - **Do not change provider endpoints** (`internal/provider/tsx.go`,
