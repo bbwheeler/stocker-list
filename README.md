@@ -82,12 +82,13 @@ what is published always reflects the provider's live listings.
 ### US (NASDAQ screener)
 
 The US provider uses the **public NASDAQ screener API** — `api.nasdaq.com/api/screener/stocks`
-(the endpoint that powers the nasdaq.com web app). It returns the full set of US common
-stocks (NYSE, NASDAQ, NYSE American) as a single JSON payload and **requires no API key**.
-The US provider is always active, alongside TSX.
+(the endpoint that powers the nasdaq.com web app). It returns US common stocks (NYSE,
+NASDAQ, NYSE American) as paginated JSON and **requires no API key**. The US provider is
+always active, alongside TSX.
 
-Note: the API does not expose a per-row exchange or currency field, so the provider maps
-every US symbol to `Exchange: "US"` and `Currency: "USD"` (safe for this all-US, USD universe).
+Note: the API does not expose a per-row exchange or currency field, so the provider runs the
+screener once per listing exchange and tags each symbol with that exchange (`NASDAQ`, `NYSE`,
+or `AMEX`); `Currency` is `"USD"` for this all-US universe.
 
 ### Response validation and graceful degradation
 

@@ -10,8 +10,9 @@ truth for the target architecture, manifest layout, and rationale. Implement
 the tasks **one at a time, in order**.
 
 **Task status:** every task below is new work relative to the current branch.
-Tasks 6–7 replace the superseded manifest work; Tasks 8–10 are removals and
-cleanups; Tasks 11–14 are verification and rollout.
+Tasks 1–4 are the one-shot code refactor; Task 5 updates prose and env
+templates; Tasks 6–7 replace the superseded manifest work; Tasks 8–10 are
+removals and cleanups; Tasks 11–14 are verification and rollout.
 
 ## Global constraints
 
@@ -42,8 +43,9 @@ cleanups; Tasks 11–14 are verification and rollout.
    kubectl create namespace stocker
    ```
 2. Registry credentials for `git.wheeli.ca` in namespace `stocker`, if the
-   `wheeli-registry` Secret does not already exist. Create it once per
-   cluster; real values stay outside the repo:
+   `wheeli-registry` Secret does not already exist. A docker-registry pull
+   Secret is namespaced: create it once in `stocker`, not per workload. Real
+   values stay outside the repo:
    ```bash
    kubectl create secret docker-registry wheeli-registry \
      --docker-server=git.wheeli.ca \
@@ -51,6 +53,8 @@ cleanups; Tasks 11–14 are verification and rollout.
      --docker-password=REPLACE_ME \
      -n stocker
    ```
+   Passing the token with `--docker-password` records it in your shell
+   history; use a file-based `.dockerconfigjson` Secret if history is shared.
 3. A RabbitMQ broker reachable from the cluster, a `stocker` user, and a
    client Service. The Secret template assumes the Service is `rabbitmq` in
    namespace `messaging`; verify with `kubectl -n messaging get svc`.
@@ -73,7 +77,9 @@ before implementing it; the package is expected **not to compile** until Task
 2.
 
 **File:** `internal/refresher/refresher_test.go` — replace the entire file
-with:
+with the following. Tests use `slog.NewTextHandler`, so log attributes match
+as `key=value`; the production handler in `cmd/server` is JSON
+(`"key":value`).
 
 ```go
 package refresher_test
@@ -157,15 +163,61 @@ func TestRunOnce_RunsExactlyOneCycle(t *testing.T) {
 	}
 }
 
-// TestRunOnce_CancelledContextIsAnError proves an interrupted run does not
-// report success (important for SIGTERM and Job deadlines).
+// TestRunOnce_CancelledContextIsAnError proves an already-cancelled run does
+// not report success (important for SIGTERM and Job deadlines).
 func TestRunOnce_CancelledContextIsAnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ref := refresher.New([]provider.Provider{&countingProvider{}}, testLog(t), &fakeProducer{})
-	if err := ref.RunOnce(ctx); err == nil {
-		t.Fatal("RunOnce() = nil, want context.Canceled")
+	p := &countingProvider{}
+	ref := refresher.New([]provider.Provider{p}, testLog(t), &fakeProducer{})
+	err := ref.RunOnce(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunOnce() = %v, want context.Canceled", err)
+	}
+	if p.calls != 0 {
+		t.Errorf("provider called %d times after pre-cancelled context, want 0", p.calls)
+	}
+}
+
+// TestRunOnce_CancelledDuringRunIsAnError proves cancellation detected after
+// the provider phase is still surfaced, even when no symbols were published.
+func TestRunOnce_CancelledDuringRunIsAnError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &cancellingProvider{cancel: cancel}
+	ref := refresher.New([]provider.Provider{p}, testLog(t), &fakeProducer{})
+
+	err := ref.RunOnce(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunOnce() = %v, want context.Canceled", err)
+	}
+}
+
+// TestRunOnce_AllProvidersFailStillSucceeds documents the tolerated degraded
+// mode: the process exits 0, publishes nothing, and logs the counts.
+func TestRunOnce_AllProvidersFailStillSucceeds(t *testing.T) {
+	var logs bytes.Buffer
+	producer := &fakeProducer{}
+	providers := []provider.Provider{
+		errorProvider{err: errors.New("tsx down")},
+		errorProvider{err: errors.New("us down")},
+	}
+	ref := refresher.New(providers, slog.New(slog.NewTextHandler(&logs, nil)), producer)
+
+	if err := ref.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v; all-provider failure is tolerated", err)
+	}
+	if msgs := producer.published(); len(msgs) != 0 {
+		t.Errorf("published %d messages, want 0", len(msgs))
+	}
+	for _, want := range []string{
+		"refresh cycle completed with provider failures",
+		"symbols=0",
+		"failed_providers=2",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs do not contain %q:\n%s", want, logs.String())
+		}
 	}
 }
 
@@ -184,6 +236,17 @@ type countingProvider struct {
 func (p *countingProvider) ListSymbols(context.Context) ([]provider.Company, error) {
 	p.calls++
 	return []provider.Company{{Symbol: "AC", Exchange: "TSX"}}, nil
+}
+
+// cancellingProvider cancels the run's context during ListSymbols to exercise
+// the post-provider cancellation check.
+type cancellingProvider struct {
+	cancel context.CancelFunc
+}
+
+func (p *cancellingProvider) ListSymbols(context.Context) ([]provider.Company, error) {
+	p.cancel()
+	return nil, context.Canceled
 }
 
 // fakeProducer records published messages so tests can assert what the
@@ -523,13 +586,17 @@ func getEnvPreserveEmpty(key, fallback string) string {
 1. Delete the three interval tests: `TestLoad_Defaults`,
    `TestLoad_CustomValues`, and `TestLoad_InvalidDuration`.
 2. Delete the now-unused `time` import.
-3. Add this test after the imports:
+3. Add this test after the imports. It sets the variable to a duration the old
+   `<= 0` validation rejected, and unsets the `RABBITMQ_*` variables so the
+   test does not depend on the developer's shell:
 
 ```go
 // TestLoad_IgnoresRefreshCheckInterval proves the removed variable has no
-// effect: cadence is owned by the Kubernetes CronJob schedule.
+// effect: cadence is owned by the Kubernetes CronJob schedule. Before the
+// removal, 0s failed the RefreshCheckInterval > 0 validation.
 func TestLoad_IgnoresRefreshCheckInterval(t *testing.T) {
-	t.Setenv("REFRESH_CHECK_INTERVAL", "not-a-duration")
+	unsetEnv(t, rabbitMQEnvKeys...)
+	t.Setenv("REFRESH_CHECK_INTERVAL", "0s")
 	if _, err := Load(); err != nil {
 		t.Fatalf("Load() error: %v; REFRESH_CHECK_INTERVAL is no longer read", err)
 	}
@@ -702,11 +769,14 @@ Make these edits:
    ```
 2. **RabbitMQ section:** change "fatal to the refresh cycle" to "fatal to the
    run".
-3. **Provider degradation section:** change "The next refresh interval retries
-   every provider" to "The next scheduled run retries every provider", and
-   "the only refresh failure it treats as an error" to "the only run failure
-   it treats as an error". The process exits `0` after publishing the healthy
-   provider's symbols.
+3. **Provider degradation section:** change "A provider failure does not stop
+   the service" to "A provider failure does not abort the run", "The next
+   refresh interval retries every provider" to "The next scheduled run retries
+   every provider", "the refresher keeps running" to "the run still completes
+   and publishes the healthy providers' symbols", and "the only refresh
+   failure it treats as an error" to "the only run failure it treats as an
+   error". The process exits `0` after publishing the healthy provider's
+   symbols.
 4. **Environment variables:** delete the entire `### Core` subsection and its
    `REFRESH_CHECK_INTERVAL` table. Add a short `### Cadence` note:
    ```markdown
@@ -721,8 +791,13 @@ Make these edits:
    "the process still performs one cycle". Remove the `REFRESH_CHECK_INTERVAL`
    row and any remaining references.
 6. **Running it / Local:** state that `make run` performs one cycle and exits.
+   Also correct the US provider description: the screener responses are
+   paginated, and symbols are tagged with the listing exchange (`NASDAQ`,
+   `NYSE`, or `AMEX`), not `Exchange: "US"`. Both match
+   `internal/provider/us.go`.
 7. **Podman:** state that `make podman-up` starts one local container that runs
-   one cycle and stops (`restart: "no"`).
+   one cycle and stops (`restart: "no"`), and that `.env.podman` supplies its
+   environment (copy values from `.env.example` if needed).
 8. **Quadlet:** delete the entire "Quadlet (rootless, systemd user service)"
    section and all `make quadlet-*` instructions.
 9. **Deployment:** add a short section:
@@ -872,12 +947,16 @@ Notes:
   contain a real password.
 - If the broker Service or namespace differs, edit the host; if the password
   contains `@`, `:`, `/`, `?`, or `#`, URL-encode it.
-- Apply the real value from a temporary copy, never from the tracked file:
+- Apply the real value from a temporary copy, never from the tracked file.
+  Use `mktemp` and a `0600` mode so the credential lands in a private,
+  unpredictable path:
   ```bash
-  cp deploy/kubernetes/secret.yaml /tmp/stocker-list-secret.yaml
-  $EDITOR /tmp/stocker-list-secret.yaml   # replace RABBITMQ_PASSWORD
-  kubectl apply -f /tmp/stocker-list-secret.yaml
-  rm /tmp/stocker-list-secret.yaml
+  tmp="$(mktemp)"
+  chmod 600 "$tmp"
+  cp deploy/kubernetes/secret.yaml "$tmp"
+  $EDITOR "$tmp"   # replace RABBITMQ_PASSWORD
+  kubectl apply -f "$tmp"
+  rm -f "$tmp"
   ```
 - `git status` must show `deploy/kubernetes/secret.yaml` unchanged except for
   the template above.
@@ -993,8 +1072,6 @@ WORKDIR /src
 
 COPY . .
 
-ENV PATH="$PATH:/root/go/bin"
-
 RUN go mod tidy
 RUN CGO_ENABLED=0 go build -o /out/stocker-list ./cmd/server
 
@@ -1008,6 +1085,8 @@ ENTRYPOINT ["/stocker-list"]
 Changes:
 
 - Remove `EXPOSE 50051`; the binary listens on no port.
+- Remove the unused `ENV PATH` line; no tools are installed into
+  `/root/go/bin`.
 - Add `USER 65532:65532` so the image's non-root default matches the Pod
   `securityContext`.
 
@@ -1054,19 +1133,35 @@ python3 - <<'PY'
 import sys
 import yaml
 
+# file -> [(kind, name, namespaced), ...]
 expected = {
-    "deploy/kubernetes/stocker-list.yaml": ["Namespace", "ConfigMap", "CronJob"],
-    "deploy/kubernetes/secret.yaml": ["Secret"],
+    "deploy/kubernetes/stocker-list.yaml": [
+        ("Namespace", "stocker", False),
+        ("ConfigMap", "stocker-list-config", True),
+        ("CronJob", "stocker-list", True),
+    ],
+    "deploy/kubernetes/secret.yaml": [
+        ("Secret", "stocker-list-env", True),
+    ],
 }
 ok = True
-for path, kinds in expected.items():
+for path, resources in expected.items():
     with open(path) as f:
         docs = [d for d in yaml.safe_load_all(f) if d]
-    got = [d.get("kind") for d in docs]
+    got = [(d.get("kind"), d.get("metadata", {}).get("name")) for d in docs]
+    want = [(kind, name) for kind, name, _ in resources]
     print(f"{path}: {got}")
-    if got != kinds:
+    if got != want:
         ok = False
-        print(f"  ERROR: want {kinds}", file=sys.stderr)
+        print(f"  ERROR: want {want}", file=sys.stderr)
+    for doc, (kind, name, namespaced) in zip(docs, resources):
+        ns = doc.get("metadata", {}).get("namespace")
+        if namespaced and ns != "stocker":
+            ok = False
+            print(f"  ERROR: {kind}/{name} namespace={ns!r}, want 'stocker'", file=sys.stderr)
+        if not namespaced and ns is not None:
+            ok = False
+            print(f"  ERROR: {kind}/{name} must not set namespace", file=sys.stderr)
 sys.exit(0 if ok else 1)
 PY
 ```
@@ -1074,8 +1169,8 @@ PY
 Expected output:
 
 ```
-deploy/kubernetes/stocker-list.yaml: ['Namespace', 'ConfigMap', 'CronJob']
-deploy/kubernetes/secret.yaml: ['Secret']
+deploy/kubernetes/stocker-list.yaml: [('Namespace', 'stocker'), ('ConfigMap', 'stocker-list-config'), ('CronJob', 'stocker-list')]
+deploy/kubernetes/secret.yaml: [('Secret', 'stocker-list-env')]
 ```
 
 Additional static checks:
@@ -1126,7 +1221,13 @@ delete resources that disappear from a file. If it is left running, the old
    ```bash
    kubectl apply -f deploy/kubernetes/stocker-list.yaml
    ```
-2. Confirm the old ConfigMap key is gone:
+2. Immediately suspend the CronJob so it cannot start before the Secret
+   exists or while the old Deployment is still publishing:
+   ```bash
+   kubectl -n stocker patch cronjob stocker-list --type=merge \
+     -p '{"spec":{"suspend":true}}'
+   ```
+3. Confirm the old ConfigMap key is gone:
    ```bash
    kubectl -n stocker get configmap stocker-list-config \
      -o jsonpath='{.data.REFRESH_CHECK_INTERVAL}{"\n"}'
@@ -1137,18 +1238,24 @@ delete resources that disappear from a file. If it is left running, the old
    kubectl -n stocker patch configmap stocker-list-config --type=json \
      -p='[{"op":"remove","path":"/data/REFRESH_CHECK_INTERVAL"}]'
    ```
-3. Delete the old Deployment:
+4. Delete the old Deployment:
    ```bash
    kubectl -n stocker delete deployment stocker-list --ignore-not-found
    ```
-4. Verify only the CronJob remains:
+5. Verify only the CronJob remains:
    ```bash
    kubectl -n stocker get deploy,svc,cronjob | grep -w stocker-list || true
    ```
    Expected: the CronJob line only; no Deployment or Service.
-5. Ensure the `wheeli-registry` pull Secret exists in namespace `stocker`
+6. Ensure the `wheeli-registry` pull Secret exists in namespace `stocker`
    (see Prerequisites).
-6. Apply the filled-in Secret from a temporary copy (see Task 7).
+7. Apply the filled-in Secret from a temporary copy (see Task 7).
+8. Unsuspend the CronJob now that the Secret exists and the old publisher is
+   gone:
+   ```bash
+   kubectl -n stocker patch cronjob stocker-list --type=merge \
+     -p '{"spec":{"suspend":false}}'
+   ```
 
 ---
 
@@ -1176,11 +1283,11 @@ kubectl -n stocker logs "job/$name" --tail=200
 Expected:
 
 - `status.succeeded` prints `1`.
-- Logs contain `refresh cycle starting`, `refresh cycle complete` with a
-  non-zero `symbols` count, and `one-shot run complete; exiting`.
-- No `level=ERROR` lines for a healthy run. If one provider is down, logs
-  contain `provider failed to list symbols` and `failed_providers=1`, but the
-  Job still succeeds.
+- The JSON logs contain `refresh cycle starting`, `refresh cycle complete`
+  with a non-zero `symbols` value, and `one-shot run complete; exiting`.
+- No `"level":"ERROR"` entries for a healthy run. If one provider is down, the
+  logs contain `provider failed to list symbols` and `"failed_providers":1`,
+  but the Job still succeeds.
 
 ### 14b. Messages reach the exchange
 
@@ -1213,7 +1320,9 @@ kubectl -n stocker get cronjob stocker-list -o jsonpath='{.spec.schedule}{"\n"}'
 kubectl -n stocker get cronjob stocker-list -o jsonpath='{.spec.concurrencyPolicy}{"\n"}'
 ```
 
-Expected: schedule `0 6 * * *`, concurrency policy `Forbid`, `SUSPEND False`.
+Expected: the default output shows `SUSPEND False`; the schedule jsonpath
+prints `0 6 * * *` and the concurrency-policy jsonpath prints `Forbid`
+(concurrency policy is not a default column).
 
 ### 14d. Optional short-schedule test
 

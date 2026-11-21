@@ -91,8 +91,9 @@ no shell loop, no sleep, and no in-process timer.
 - **No Deployment.** A Deployment would restart the process after every
   successful run, defeating the one-shot contract and publishing continuously.
 - **No probes.** `stocker-store` uses a `tcpSocket` readiness probe because it
-  listens on `3500`. `stocker-list` listens on nothing; a probe would fail and
-  CrashLoop the pod. Job completion is the health signal.
+  listens on `3500`. `stocker-list` listens on nothing, so a probe would fail;
+  a liveness probe would restart the container and a readiness probe is
+  meaningless for a Job. Job completion is the health signal.
 
 ### Idempotency and delivery
 
@@ -161,7 +162,7 @@ no shell loop, no sleep, and no in-process timer.
 |---|---|---|
 | `apiVersion` / `kind` | `batch/v1` / `CronJob` | Stable batch API. |
 | `metadata.name` | `stocker-list` | Workload name convention. |
-| `spec.schedule` | `"0 6 * * *"` | Daily at 06:00. The schedule is interpreted in the controller manager's time zone (normally UTC). Edit this one field to change cadence; no code or env var is involved. |
+| `spec.schedule` | `"0 6 * * *"` | Daily at 06:00. The schedule is interpreted in the controller manager's time zone (normally UTC); set `spec.timeZone` if the control plane is not UTC. Edit this field to change cadence; no code or env var is involved. |
 | `spec.concurrencyPolicy` | `Forbid` | A second run must not overlap the first; overlapping runs would duplicate the full universe. A run that is still active when the next schedule fires is skipped. |
 | `spec.successfulJobsHistoryLimit` | `3` | Keep three successful Jobs (and their logs) for troubleshooting; bound object growth. |
 | `spec.failedJobsHistoryLimit` | `3` | Keep three failed Jobs for diagnosis; bound object growth. |
@@ -254,9 +255,9 @@ cadence control:
   tracked file, a commit, or this document.
 - Apply the filled-in Secret from a temporary copy, then delete the copy (see
   the implementation plan). Never commit the filled-in version.
-- `wheeli-registry` is a cluster prerequisite in namespace `stocker`. It is
-  created once per cluster, not per workload, and its credentials also stay
-  outside the repository.
+- `wheeli-registry` is a namespace prerequisite in `stocker`. A docker-registry
+  pull Secret is namespaced, so create it once in `stocker`, not per workload;
+  its credentials also stay outside the repository.
 
 ## Dependencies
 
@@ -275,7 +276,7 @@ cadence control:
 | Situation | Behavior | Process exit | Job result |
 |---|---|---|---|
 | One provider fails | Logs `provider failed to list symbols`, continues with the remaining providers, publishes their symbols | `0` | Complete (degraded) |
-| All providers fail | Logs `refresh cycle completed with provider failures` with `symbols=0`, publishes nothing | `0` | Complete (degraded); alert on `symbols=0` |
+| All providers fail | Logs `refresh cycle completed with provider failures` with a `symbols` value of `0`, publishes nothing | `0` | Complete (degraded); alert when `symbols` is `0` |
 | Publish or confirm fails | Producer reconnects and retries the publish once; a second failure is returned | `1` | Retried once by `backoffLimit`, then Failed |
 | Initial broker connection fails | No internal retry on the first dial; the error is returned | `1` | Retried once by `backoffLimit`, then Failed |
 | Run exceeds 10 minutes | `activeDeadlineSeconds` terminates the Pod | terminated | Failed; no further retry in that Job |
@@ -284,8 +285,9 @@ cadence control:
 
 A run where **every** provider fails exits `0` because per-provider failures
 are explicitly tolerated. This is a known limitation: monitoring should alert
-on `symbols=0` or `failed_providers=2` in the Job logs. Making zero symbols
-fatal is a possible future change, not part of this design.
+on the `symbols` attribute reaching `0` or `failed_providers` reaching `2` in
+the Job's JSON logs. Making zero symbols fatal is a possible future change,
+not part of this design.
 
 ## Code changes
 
@@ -298,8 +300,8 @@ fatal is a possible future change, not part of this design.
 - Keep per-provider failure tolerance: a provider error is logged and the
   remaining providers are still used.
 - Keep publish failures fatal: a publish error is returned to the caller.
-- Return `ctx.Err()` for an already-cancelled or interrupted context so a
-  `SIGTERM`/deadline does not look like success.
+- Surface the context error (directly or wrapped) for an already-cancelled or
+  interrupted context so a `SIGTERM`/deadline does not look like success.
 
 ### `internal/config`
 
@@ -322,11 +324,15 @@ fatal is a possible future change, not part of this design.
 - Rewrite the refresher tests for one-shot semantics: direct `RunOnce` calls
   instead of goroutines plus sleeps.
 - Add a test proving the provider is called exactly once per invocation.
-- Add a test proving a cancelled context returns an error.
+- Add tests proving an already-cancelled context and a context cancelled
+  during a provider call both return a context error.
+- Add a test proving the all-providers-fail case still returns `nil` and
+  publishes nothing.
 - Keep coverage for provider tolerance, publish failure, and the HTML
   maintenance-page incident.
-- Remove the config tests for `REFRESH_CHECK_INTERVAL`; add one asserting the
-  variable is ignored after removal.
+- Remove the config tests for `REFRESH_CHECK_INTERVAL`; add one that sets it
+  to a value the old validation rejected (`0s`) and asserts `Load` succeeds,
+  proving the variable is no longer read.
 
 ## Repository cleanup
 
@@ -335,7 +341,7 @@ fatal is a possible future change, not part of this design.
 | `deploy/quadlet/stocker-list.container` | **Remove** | It is a long-running `Restart=always` systemd user unit. That contradicts one-shot semantics and would restart the process after every successful run. The CronJob is the deployment mechanism. |
 | Makefile `quadlet-*` targets | **Remove** | `quadlet-install` references a nonexistent `stocker-list-rootless.container`; the targets are broken. |
 | `podman-compose.yml` | **Replace with one local `stocker-list` service** | Remove vestigial `ports: 50051` and `depends_on: postgres`; the process listens on nothing and has no Postgres dependency. Set `restart: "no"` because the process exits after one cycle. Remove the unrelated legacy `tsx-evaluator` / `tsx-history` services, which reference images and dependencies that do not exist in this repository. |
-| `Containerfile` `EXPOSE 50051` | **Remove** | The binary listens on no port. Keep the distroless static runtime. Add `USER 65532:65532` so the image's non-root default matches the Pod security context. |
+| `Containerfile` `EXPOSE 50051` | **Remove** | The binary listens on no port. Keep the distroless static runtime. Add `USER 65532:65532` so the image's non-root default matches the Pod security context, and drop the unused `/root/go/bin` PATH entry. |
 | `README.md`, `design.md`, `.env.example`, `.env.podman` | **Update** | Remove the refresh-loop/interval language and the quadlet instructions; describe one-shot execution and the CronJob. |
 
 If a non-Kubernetes scheduler is needed later, use a systemd **timer** that
@@ -361,28 +367,37 @@ resources, image policy, no service account, no pod security context) matches.
 1. Apply the new `deploy/kubernetes/stocker-list.yaml`. This creates the
    `stocker` Namespace if needed, updates `stocker-list-config`, and creates
    the CronJob.
-2. Verify the live ConfigMap no longer contains `REFRESH_CHECK_INTERVAL`. If
+2. Immediately suspend the CronJob so it cannot start before the Secret
+   exists or while the old Deployment is still publishing:
+   `kubectl -n stocker patch cronjob stocker-list --type=merge -p '{"spec":{"suspend":true}}'`.
+3. Verify the live ConfigMap no longer contains `REFRESH_CHECK_INTERVAL`. If
    it persists because the ConfigMap was not previously managed by
    `kubectl apply`, remove the key manually.
-3. Delete the old Deployment:
+4. Delete the old Deployment:
    `kubectl -n stocker delete deployment stocker-list --ignore-not-found`.
    Otherwise the old long-running loop and the CronJob will both publish.
-4. Apply the filled-in Secret from a temporary copy.
-5. Run the smoke test in the implementation plan.
+5. Apply the filled-in Secret from a temporary copy (the implementation plan
+   shows a `mktemp`/`chmod 600` procedure).
+6. Ensure the `wheeli-registry` pull Secret exists in namespace `stocker`.
+7. Unsuspend the CronJob:
+   `kubectl -n stocker patch cronjob stocker-list --type=merge -p '{"spec":{"suspend":false}}'`.
+8. Run the smoke test in the implementation plan.
 
 ## Verification (what "healthy" looks like)
 
-- `kubectl -n stocker get cronjob stocker-list` shows schedule `0 6 * * *`,
-  `CONCURRENCY POLICY Forbid`, and `SUSPEND False`.
+- `kubectl -n stocker get cronjob stocker-list` shows schedule `0 6 * * *`
+  and `SUSPEND False`; `-o jsonpath='{.spec.concurrencyPolicy}'` prints
+  `Forbid` (concurrency policy is not a default output column).
 - A manual Job and a scheduled Job complete with `status.succeeded: 1`.
-- Job logs contain `refresh cycle starting`, `refresh cycle complete` with a
-  non-zero `symbols` count, and `one-shot run complete; exiting`.
+- The Job's JSON logs contain `refresh cycle starting`, `refresh cycle
+  complete` with a non-zero `symbols` value, and `one-shot run complete;
+  exiting`.
 - No Deployment or Service named `stocker-list` exists.
 - Messages appear on exchange `stock.update` with routing key
   `stock.update.v1` (bind a queue before the run, or observe the downstream
   consumer).
-- A provider failure produces `failed_providers=1` but still exits `0` and
-  publishes the healthy provider's symbols.
+- A provider failure produces a `failed_providers` value of `1` but still
+  exits `0` and publishes the healthy provider's symbols.
 - An unreachable broker produces exit `1`, one retry, and a Failed Job.
 
 ## Out of scope
@@ -390,5 +405,5 @@ resources, image policy, no service account, no pod security context) matches.
 - RabbitMQ broker, exchange, queue, and binding management.
 - Downstream consumers and their idempotency implementation.
 - Registry provisioning and `wheeli-registry` credential rotation.
-- Monitoring/alerting rules for `symbols=0` or failed Jobs.
+- Monitoring/alerting rules for a zero `symbols` count or failed Jobs.
 - Migration of historical symbol data.
